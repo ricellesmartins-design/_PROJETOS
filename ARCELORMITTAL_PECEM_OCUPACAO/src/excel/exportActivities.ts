@@ -1,5 +1,5 @@
 // Exportação 1 — Relatório de Atividades (SE-PL-0510-CD001-R0), layout idêntico ao modelo:
-// cabeçalho mesclado (A1:L1, A2:F2, G2:L2, A3:F3, G3:L3), logo IDG em N1:O3, tabela A:O a partir da
+// aba oficial "ANTÔNIO DOS ANJOS_SETEMBRO-2026" (estimativas F:H ocultas), cabeçalho mesclado (A1:L1, A2:F2, G2:L2, A3:F3, G3:L3), logo IDG em N1:O3, tabela A:O a partir da
 // linha 4, fórmula de total =SUM(K5:Kn), rodapé de assinaturas, estilos/tema originais e aba
 // oculta "Planilha1" com os centros de custo (usada pela formatação condicional da coluna M).
 import JSZip from 'jszip';
@@ -83,7 +83,7 @@ function buildSheet(sh: ActivitySheet, sst: SST): string {
   rows.push(
     rowXml(
       2,
-      [{ s: 57, v: `COLABORADOR:  ${c.nome}` }, { s: 54 }, { s: 54 }, { s: 54 }, { s: 54 }, { s: 56 }, { s: 57, v: `MATRÍCULA:  ${c.matricula}` }, { s: 54 }, { s: 49 }, { s: 49 }, { s: 49 }, { s: 50 }, { s: 23 }, { s: 44 }, { s: 45 }],
+      [{ s: 48, v: `COLABORADOR:  ${c.nome}` }, { s: 54 }, { s: 54 }, { s: 54 }, { s: 54 }, { s: 56 }, { s: 48, v: `MATRÍCULA:  ${c.matricula}` }, { s: 54 }, { s: 49 }, { s: 49 }, { s: 49 }, { s: 50 }, { s: 23 }, { s: 44 }, { s: 45 }],
       sst,
       H,
     ),
@@ -91,19 +91,18 @@ function buildSheet(sh: ActivitySheet, sst: SST): string {
   rows.push(
     rowXml(
       3,
-      [{ s: 54, v: `FUNÇÃO:  ${c.funcao}` }, { s: 54 }, { s: 54 }, { s: 54 }, { s: 54 }, { s: 56 }, { s: 59, v: `PERÍODO: ${periodLabel(sh.month)}` }, { s: 49 }, { s: 49 }, { s: 49 }, { s: 49 }, { s: 50 }, { s: 24 }, { s: 46 }, { s: 47 }],
+      [{ s: 55, v: `FUNÇÃO:  ${c.funcao}` }, { s: 54 }, { s: 54 }, { s: 54 }, { s: 54 }, { s: 56 }, { s: 48, v: `PERÍODO: ${periodLabel(sh.month)}` }, { s: 49 }, { s: 49 }, { s: 49 }, { s: 49 }, { s: 50 }, { s: 24 }, { s: 46 }, { s: 47 }],
       sst,
       H,
     ),
   );
   const heads = ['ID', 'DESCRIÇÃO DA ATIVIDADE', 'SOLICITANTE', 'ÁREA USINA', 'DATA SOLICITAÇÃO', 'ESTIMATIVA DE INÍCIO', 'ESTIMATIVA DE TÉRMINO', 'ESTIMATIVA DE HORAS', 'INÍCIO REAL', 'TÉRMINO REAL', 'HORAS REALIZADAS', 'NÚMERO DO DOCUMENTO AMP', 'CENTRO DE CUSTO', 'STATUS', 'OBSERVAÇÃO'];
   const headStyles = [14, 13, 13, 13, 14, 17, 17, 17, 14, 14, 13, 13, 13, 13, 14];
-  rows.push(rowXml(4, heads.map((h, i) => ({ s: headStyles[i], v: h })), sst, ' s="7" customFormat="1" ht="54"'));
+  rows.push(rowXml(4, heads.map((h, i) => ({ s: headStyles[i], v: h })), sst, ' s="7" customFormat="1" ht="36"'));
 
   let r = 5;
   const list = [...sh.activities].sort((a, b) => (a.inicioReal ?? a.estInicio ?? a.dataSolicitacao ?? '').localeCompare(b.inicioReal ?? b.estInicio ?? b.dataSolicitacao ?? ''));
   for (const a of list) {
-    const idStyle = a.status === 'Finalizado' ? 19 : a.status === 'Em andamento' || a.status === 'Aguardando Cliente' ? 20 : 30;
     const est = computeEstHours(a);
     const real = computeRealHours(a);
     const estCell: Cell =
@@ -112,16 +111,16 @@ function buildSheet(sh: ActivitySheet, sst: SST): string {
         : { s: 1, v: est };
     const realCell: Cell =
       a.realModo === 'auto' && a.inicioReal && a.terminoReal && a.horasDiaReal
-        ? { s: 1, f: `NETWORKDAYS(I${r},J${r})*${a.horasDiaReal}`, v: networkDays(a.inicioReal, a.terminoReal) * a.horasDiaReal }
-        : { s: 1, v: real };
+        ? { s: 40, f: `NETWORKDAYS(I${r},J${r})*${a.horasDiaReal}`, v: networkDays(a.inicioReal, a.terminoReal) * a.horasDiaReal }
+        : { s: 40, v: real };
     const docs = a.documentosAMP.trim();
-    const lines = Math.max(docs ? docs.split('\n').length : 1, Math.ceil(a.descricao.length / 55), Math.ceil(a.observacao.length / 70));
-    const ht = Math.max(39.6, lines * 18.6);
+    const lines = Math.max(docs ? docs.split('\n').length : 1, Math.ceil(a.descricao.length / 85), Math.ceil(a.observacao.length / 65));
+    const ht = Math.max(36, lines * 20);
     rows.push(
       rowXml(
         r,
         [
-          { s: idStyle, v: a.codigo },
+          { s: 30, v: a.codigo },
           { s: 11, v: a.descricao },
           { s: 3, v: a.solicitante },
           { s: 1, v: a.area },
@@ -132,7 +131,7 @@ function buildSheet(sh: ActivitySheet, sst: SST): string {
           { s: 4, v: d(a.inicioReal) },
           { s: 4, v: d(a.terminoReal) },
           realCell,
-          { s: 18, v: docs },
+          { s: 29, v: docs },
           { s: 4, v: a.centroCusto },
           { s: 1, v: a.status },
           { s: 8, v: a.observacao },
@@ -153,12 +152,19 @@ function buildSheet(sh: ActivitySheet, sst: SST): string {
       ' ht="41.45" customHeight="1"',
     ),
   );
+  // Quatro linhas em branco com bordas após o total, como na aba oficial do modelo.
+  for (let i = 1; i <= 4; i++) {
+    const rr = r + i;
+    rows.push(
+      rowXml(rr, [{ s: 8 }, { s: i <= 2 ? 11 : 8 }, { s: 8 }, { s: 8 }, { s: 8 }, { s: 8 }, { s: 1 }, { s: 1 }, { s: 1 }, { s: i === 2 ? 26 : 1 }, { s: 1 }, { s: 8 }, { s: 8 }, { s: 1 }, { s: 8 }], sst, ' ht="39.6" customHeight="1"'),
+    );
+  }
   const cfRange = `M5:M${Math.max(last, 5)}`;
   const cf = cfTpl.replace(/M5:M7 M9:M91/g, cfRange);
   const cfMain = cf.slice(0, cf.indexOf('<extLst>'));
   const cfExt = cf.slice(cf.indexOf('<extLst>'));
   return sheetTpl
-    .replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:O${r}"/>`)
+    .replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:O${r + 4}"/>`)
     .replace('<sheetData/>', `<sheetData>${rows.join('')}</sheetData>`)
     .replace('<pageMargins', `${cfMain.trim()}<pageMargins`)
     .replace('</worksheet>', `${cfExt.trim()}</worksheet>`)
