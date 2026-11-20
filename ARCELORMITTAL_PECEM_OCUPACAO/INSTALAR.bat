@@ -5,6 +5,9 @@ title Instalar projeto ArcelorMittal Pecem - Ocupacao (IDG)
 rem Rode uma vez. Instala as dependencias e liga a pasta _PROJETOS ao GitHub
 rem (repositorio ricellesmartins-design/_PROJETOS), sem mexer nos outros projetos da pasta.
 cd /d "%~dp0"
+rem As chaves publicas do Supabase vem do arquivo env.publico.txt quando o .env nao existe
+if not exist ".env.production" if exist "env.publico.txt" copy /y "env.publico.txt" ".env.production" >nul
+if not exist ".env.development" if exist "env.publico.txt" copy /y "env.publico.txt" ".env.development" >nul
 
 where npm >nul 2>nul || (echo [ERRO] Instale o Node.js LTS: https://nodejs.org & goto :fim)
 

@@ -3,6 +3,9 @@ chcp 65001 >nul
 setlocal EnableExtensions
 title Atualizar app ArcelorMittal Pecem - Ocupacao (IDG)
 cd /d "%~dp0"
+rem As chaves publicas do Supabase vem do arquivo env.publico.txt quando o .env nao existe
+if not exist ".env.production" if exist "env.publico.txt" copy /y "env.publico.txt" ".env.production" >nul
+if not exist ".env.development" if exist "env.publico.txt" copy /y "env.publico.txt" ".env.development" >nul
 
 echo ============================================================
 echo   Atualizar app ArcelorMittal Pecem - Ocupacao  (IDG)
