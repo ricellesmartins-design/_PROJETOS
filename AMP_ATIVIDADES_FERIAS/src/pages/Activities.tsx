@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Download, Edit3, Eye, FileSpreadsheet, History, Plus, Search, Trash2 } from 'lucide-react';
+import { Edit3, Eye, FileSpreadsheet, History, Plus, Search, Trash2 } from 'lucide-react';
 import { useDb, useRoute, useSession, collaboratorName } from '../lib/store';
 import { can } from '../lib/auth';
 import { fmtBR, fmtDateTimeBR, monthLabel, todayISO } from '../lib/dates';
 import { activityMonths, activitiesInMonth, computeEstHours, computeRealHours, deleteActivity, emptyActivity, isClosed, isLate, isRunningToday } from '../services/activities';
 import { visibleActivities, visibleCollaborators } from '../services/views';
-import { exportActivities, planSheets } from '../excel/exportActivities';
 import { ACTIVITY_STATUSES, DATE_FIELD_LABEL, type Activity } from '../types';
 import ActivityForm from '../components/ActivityForm';
+import ExportDialog from '../components/ExportDialog';
 import { Badge, Button, Card, Empty, Field, Modal, StatusBadge, useAction } from '../components/ui';
 
 export default function Activities() {
@@ -240,7 +240,20 @@ export default function Activities() {
 
       {editing && <ActivityForm key={editing.a.id} initial={editing.a} isNew={editing.isNew} onClose={() => setEditing(undefined)} />}
       {history && <HistoryModal a={history} onClose={() => setHistory(undefined)} />}
-      {exportOpen && <ExportModal onClose={() => setExportOpen(false)} defaultCollab={f.collab} defaultMonth={f.month} />}
+      {exportOpen && (
+        <ExportDialog
+          onClose={() => setExportOpen(false)}
+          initial={{
+            from: f.month || undefined,
+            collabs: f.collab ? [f.collab] : [],
+            status: f.status ? [f.status as Activity['status']] : [],
+            areas: f.area ? [f.area] : [],
+            ccs: f.cc ? [f.cc] : [],
+            solicitantes: f.solicitante ? [f.solicitante] : [],
+            situacao: f.situacao === 'atrasadas' || f.situacao === 'abertas' ? f.situacao : '',
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -281,82 +294,6 @@ function HistoryModal({ a, onClose }: { a: Activity; onClose: () => void }) {
           </tbody>
         </table>
       )}
-    </Modal>
-  );
-}
-
-function ExportModal({ onClose, defaultCollab, defaultMonth }: { onClose: () => void; defaultCollab: string; defaultMonth: string }) {
-  const { user } = useSession();
-  const today = todayISO();
-  const collabs = visibleCollaborators(user);
-  const all = visibleActivities(user);
-  const months = activityMonths(all, today).reverse();
-  const [sel, setSel] = useState<string[]>(defaultCollab ? [defaultCollab] : collabs.map((c) => c.id));
-  const [mSel, setMSel] = useState<string[]>(defaultMonth ? [defaultMonth] : months.slice(0, 1));
-  const [byMonth, setByMonth] = useState(true);
-  const { busy, run } = useAction();
-  const sheets = planSheets(
-    collabs.filter((c) => sel.includes(c.id)),
-    all,
-    byMonth ? mSel : [],
-  );
-  const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Exportar Relatório de Atividades (SE-PL-0510-CD001-R0)"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button
-            icon={<Download className="h-4 w-4" />}
-            loading={busy}
-            disabled={!sheets.length}
-            onClick={() =>
-              run(async () => {
-                const hint = sel.length === 1 ? collabs.find((c) => c.id === sel[0])!.nome : 'EQUIPE_AMP';
-                await exportActivities(sheets, `${hint}${byMonth && mSel.length === 1 ? '_' + mSel[0] : ''}`);
-                onClose();
-              }, 'Relatório gerado.')
-            }
-          >
-            Gerar Excel ({sheets.length} aba{sheets.length === 1 ? '' : 's'})
-          </Button>
-        </>
-      }
-    >
-      <p className="mb-3 text-sm text-slate-600">
-        Gera o arquivo no layout oficial (cabeçalho mesclado, logo IDG em N1:O3, colunas A–O, total <code>=SUM(K5:Kn)</code>), com uma aba por colaborador e mês.
-      </p>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div>
-          <div className="label">Colaboradores</div>
-          <div className="max-h-64 space-y-1 overflow-y-auto rounded border p-2">
-            {collabs.map((c) => (
-              <label key={c.id} className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={sel.includes(c.id)} onChange={() => setSel((s) => toggle(s, c.id))} /> {c.nome}
-              </label>
-            ))}
-          </div>
-        </div>
-        <div>
-          <label className="mb-2 flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={byMonth} onChange={(e) => setByMonth(e.target.checked)} /> Separar abas por mês
-          </label>
-          {byMonth && (
-            <div className="max-h-56 space-y-1 overflow-y-auto rounded border p-2">
-              {months.map((m) => (
-                <label key={m} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={mSel.includes(m)} onChange={() => setMSel((s) => toggle(s, m))} /> {monthLabel(m)}
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
     </Modal>
   );
 }

@@ -5,10 +5,10 @@ import { useDb, useSession, collaboratorName } from '../lib/store';
 import { addDays, fmtBR, fmtDateTimeBR, isWeekend, monthKey, monthLabel, networkDays, todayISO } from '../lib/dates';
 import { computeEstHours, computeRealHours, isClosed, isLate } from '../services/activities';
 import { visibleActivities, visibleCollaborators } from '../services/views';
-import { exportActivities, planSheets } from '../excel/exportActivities';
 import { download, XLSX_MIME } from '../excel/common';
 import { DATE_FIELD_LABEL, MODALITY_LABEL, type Activity } from '../types';
 import VacationMap from '../components/VacationMap';
+import ExportDialog from '../components/ExportDialog';
 import { Badge, Button, Card, Empty, Stat, StatusBadge, cx, useAction } from '../components/ui';
 
 /** Distribui horas proporcionalmente pelos dias úteis de cada mês do intervalo. */
@@ -131,6 +131,7 @@ export default function Reports() {
   const [to, setTo] = useState(`${year0}-12`);
   const [collab, setCollab] = useState('');
   const [vacYear, setVacYear] = useState(year0 + 1);
+  const [exportOpen, setExportOpen] = useState(false);
   const isCoord = user.role === 'coordenador';
   const collabs = visibleCollaborators(user);
   const ccName = new Map(db.all('costCenters').map((c) => [c.codigo, c.denominacao]));
@@ -256,15 +257,6 @@ export default function Reports() {
       download(new Blob([buf], { type: XLSX_MIME }), `Relatorio_Gerencial_AMP_${from}_a_${to}.xlsx`);
     }, 'Relatório gerencial exportado.');
 
-  const exportSE = () =>
-    run(async () => {
-      const ms: string[] = [];
-      for (let k = from; k <= to; k = monthKey(addDays(`${k}-28`, 7))) ms.push(k);
-      const cs = collab ? collabs.filter((c) => c.id === collab) : collabs;
-      const sheets = planSheets(cs, list, ms);
-      await exportActivities(sheets, `${from}_a_${to}`);
-    }, 'Relatório SE-PL-0510 gerado.');
-
   return (
     <div className="space-y-5">
       <Card
@@ -272,8 +264,8 @@ export default function Reports() {
         title="Relatórios executivos"
         actions={
           <>
-            <Button size="sm" variant="secondary" icon={<FileSpreadsheet className="h-4 w-4 text-emerald-600" />} loading={busy} onClick={exportSE}>
-              SE-PL-0510 (abas por mês)
+            <Button size="sm" variant="secondary" icon={<FileSpreadsheet className="h-4 w-4 text-emerald-600" />} onClick={() => setExportOpen(true)}>
+              Exportar Excel com filtros (SE-PL-0510 / alocação mensal)
             </Button>
             <Button size="sm" icon={<Download className="h-4 w-4" />} loading={busy} onClick={exportMgmt}>
               Exportar relatório gerencial
@@ -435,6 +427,7 @@ export default function Reports() {
           </Card>
         </>
       )}
+      {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} initial={{ from, to, collabs: collab ? [collab] : [] }} />}
     </div>
   );
 }
