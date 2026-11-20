@@ -23,6 +23,7 @@ import { SessionProvider, useDb, useRoute, navigate } from './lib/store';
 import { startLocalReminders } from './lib/push';
 import { ToastProvider, cx, Badge } from './components/ui';
 import Login from './pages/Login';
+import AccessLink from './pages/AccessLink';
 import Dashboard from './pages/Dashboard';
 import Activities from './pages/Activities';
 import ActivityImport from './pages/ActivityImport';
@@ -195,6 +196,14 @@ export default function App() {
   const [state, setState] = useState<'loading' | 'out' | 'in'>('loading');
   const [profile, setProfile] = useState<Profile>();
   const [error, setError] = useState('');
+  // Link de convite / nova senha enviado por e-mail (?acesso=<id>.<token>).
+  const [acesso, setAcesso] = useState(() => new URLSearchParams(window.location.search).get('acesso') ?? '');
+  const closeAccess = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('acesso');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    setAcesso('');
+  };
 
   async function boot() {
     setError('');
@@ -226,12 +235,23 @@ export default function App() {
 
   return (
     <ToastProvider>
-      {state === 'loading' && (
+      {acesso && (
+        <AccessLink
+          acesso={acesso}
+          onCancel={closeAccess}
+          onDone={() => {
+            closeAccess();
+            setState('loading');
+            boot();
+          }}
+        />
+      )}
+      {!acesso && state === 'loading' && (
         <div className="flex min-h-screen items-center justify-center gap-2 text-slate-500">
           <Loader2 className="h-5 w-5 animate-spin" /> Carregando…
         </div>
       )}
-      {state === 'out' && (
+      {!acesso && state === 'out' && (
         <>
           {error && <div className="fixed inset-x-0 top-0 z-50 bg-red-600 px-4 py-2 text-center text-sm text-white">{error}</div>}
           <Login
@@ -242,7 +262,7 @@ export default function App() {
           />
         </>
       )}
-      {state === 'in' && profile && (
+      {!acesso && state === 'in' && profile && (
         <Shell
           realUser={profile}
           onLogout={async () => {

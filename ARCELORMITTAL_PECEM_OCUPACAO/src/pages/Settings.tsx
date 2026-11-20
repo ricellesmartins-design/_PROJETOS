@@ -8,6 +8,7 @@ import { uid } from '../lib/id';
 import { fmtBR, fmtDateTimeBR, holidaysOf, todayISO } from '../lib/dates';
 import { downloadBackupExcel, downloadBackupJson, resetSystem, type ResetScope } from '../lib/backup';
 import type { Collaborator, CostCenter, Holiday, Role, Settings as SettingsT } from '../types';
+import InvitesCard from '../components/InvitesCard';
 import defaultLogo from '../templates/logo-idg-default.png';
 import defaultSeals from '../templates/selos-iso-default.png';
 import { Alert, Badge, Button, Card, Field, Modal, useAction } from '../components/ui';
@@ -283,6 +284,7 @@ export default function Settings() {
 
       <CollaboratorsCard />
       <CostCentersCard />
+      <InvitesCard />
       <UsersCard currentUserId={user.id} />
     </div>
   );
