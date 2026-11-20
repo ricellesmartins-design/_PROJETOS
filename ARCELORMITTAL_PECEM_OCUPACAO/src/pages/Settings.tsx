@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bell, Database, Image as ImageIcon, KeyRound, Mail, Plus, RotateCcw, Save, Trash2, Users } from 'lucide-react';
+import { Bell, Database, Image as ImageIcon, KeyRound, Mail, Plus, RotateCcw, Save, Trash2, UserCheck, UserX, Users } from 'lucide-react';
 import { useDb, useSession } from '../lib/store';
 import { invokeFunction } from '../lib/supabase';
 import { adminResetPassword, ROLE_LABEL } from '../lib/auth';
@@ -294,15 +294,40 @@ function CollaboratorsCard() {
   const db = useDb();
   const { busy, run } = useAction();
   const [edit, setEdit] = useState<Collaborator & { novo?: boolean }>();
-  const list = db.all('collaborators');
+  const [desligar, setDesligar] = useState<Collaborator>();
+  const [excluir, setExcluir] = useState<Collaborator>();
+  const [confirmText, setConfirmText] = useState('');
+  const [verDesligados, setVerDesligados] = useState(false);
+  const all = [...db.all('collaborators')].sort((a, b) => Number(b.ativo) - Number(a.ativo) || (a.nome ?? '').localeCompare(b.nome ?? ''));
+  const list = all.filter((c) => verDesligados || c.ativo);
+  const desligados = all.filter((c) => !c.ativo).length;
+  const logins = (id: string) => db.all('profiles').filter((p) => p.collaboratorId === id);
+  const nAtiv = (id: string) => db.all('activities').filter((a) => a.collaboratorId === id).length;
+  const nFer = (id: string) => db.all('vacations').filter((v) => v.collaboratorId === id).length;
+
+  // Desligar = inativar o cadastro e bloquear o login vinculado; o histórico continua nos relatórios e backups.
+  const setAtivo = (c: Collaborator, ativo: boolean) =>
+    run(async () => {
+      await db.update('collaborators', { ...c, ativo });
+      for (const p of logins(c.id)) if (p.ativo !== ativo) await db.update('profiles', { ...p, ativo });
+      setDesligar(undefined);
+    }, ativo ? 'Colaborador reativado e acesso liberado.' : 'Colaborador desligado e acesso bloqueado.');
+
   return (
     <Card
       title="Colaboradores"
       bodyClass="p-0"
       actions={
-        <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit({ id: uid('c_'), nome: '', matricula: '', funcao: '', email: '', ativo: true, novo: true })}>
-          Novo colaborador
-        </Button>
+        <>
+          {desligados > 0 && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input type="checkbox" checked={verDesligados} onChange={(e) => setVerDesligados(e.target.checked)} /> Mostrar desligados ({desligados})
+            </label>
+          )}
+          <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit({ id: uid('c_'), nome: '', matricula: '', funcao: '', email: '', ativo: true, novo: true })}>
+            Novo colaborador
+          </Button>
+        </>
       }
     >
       <div className="overflow-x-auto">
@@ -319,22 +344,101 @@ function CollaboratorsCard() {
           </thead>
           <tbody>
             {list.map((c) => (
-              <tr key={c.id} className="hover:bg-slate-50">
+              <tr key={c.id} className={c.ativo ? 'hover:bg-slate-50' : 'opacity-70 hover:bg-slate-50'}>
                 <td className="td font-medium">{c.nome}</td>
                 <td className="td">{c.matricula}</td>
                 <td className="td">{c.funcao}</td>
                 <td className="td text-xs">{c.email || <span className="text-slate-400">—</span>}</td>
-                <td className="td">{c.ativo ? <Badge color="green">Ativo</Badge> : <Badge>Inativo</Badge>}</td>
-                <td className="td text-right">
+                <td className="td">{c.ativo ? <Badge color="green">Ativo</Badge> : <Badge color="red">Desligado</Badge>}</td>
+                <td className="td whitespace-nowrap text-right">
                   <Button size="sm" variant="ghost" onClick={() => setEdit({ ...c })}>
                     Editar
                   </Button>
+                  {c.ativo ? (
+                    <Button size="sm" variant="ghost" icon={<UserX className="h-4 w-4" />} onClick={() => setDesligar(c)}>
+                      Desligar
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" icon={<UserCheck className="h-4 w-4" />} loading={busy} onClick={() => setAtivo(c, true)}>
+                      Reativar
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<Trash2 className="h-4 w-4 text-red-600" />}
+                    title="Excluir definitivamente"
+                    onClick={() => {
+                      setConfirmText('');
+                      setExcluir(c);
+                    }}
+                  />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {desligar && (
+        <Modal
+          open
+          size="md"
+          onClose={() => setDesligar(undefined)}
+          title={`Desligar ${desligar.nome}`}
+          footer={
+            <Button variant="danger" loading={busy} icon={<UserX className="h-4 w-4" />} onClick={() => setAtivo(desligar, false)}>
+              Desligar
+            </Button>
+          }
+        >
+          <div className="space-y-2 text-sm">
+            <p>O colaborador sai das listas, filtros, mapa de carga e cadastros novos{logins(desligar.id).length ? ', e o login dele fica bloqueado' : ''}.</p>
+            <p>
+              O histórico é mantido: <b>{nAtiv(desligar.id)}</b> atividade(s) e <b>{nFer(desligar.id)}</b> solicitação(ões) de férias continuam nos backups e podem ser vistos marcando “Mostrar desligados”. Dá para reativar
+              depois.
+            </p>
+          </div>
+        </Modal>
+      )}
+      {excluir && (
+        <Modal
+          open
+          size="md"
+          onClose={() => setExcluir(undefined)}
+          title={`Excluir definitivamente ${excluir.nome}`}
+          footer={
+            <Button
+              variant="danger"
+              loading={busy}
+              disabled={confirmText.trim().toUpperCase() !== 'EXCLUIR'}
+              icon={<Trash2 className="h-4 w-4" />}
+              onClick={() =>
+                run(async () => {
+                  downloadBackupJson('backup_antes_de_excluir');
+                  await downloadBackupExcel('backup_antes_de_excluir');
+                  for (const p of logins(excluir.id)) await db.update('profiles', { ...p, ativo: false, collaboratorId: undefined });
+                  await db.remove('collaborators', excluir.id);
+                  for (const t of ['activities', 'vacations', 'dateChangeLogs', 'profiles'] as const) await db.refresh(t);
+                  setExcluir(undefined);
+                }, 'Colaborador excluído. O backup foi baixado antes.')
+              }
+            >
+              Baixar backup e excluir
+            </Button>
+          }
+        >
+          <div className="space-y-3 text-sm">
+            <Alert kind="error" title="Não dá para desfazer">
+              Apaga o cadastro e também <b>{nAtiv(excluir.id)}</b> atividade(s) e <b>{nFer(excluir.id)}</b> solicitação(ões) de férias dele. Use só para cadastro feito por engano. Para quem foi demitido ou
+              desligado, use <b>Desligar</b>, que mantém o histórico.
+            </Alert>
+            <p>Antes de apagar, o sistema baixa o backup completo (JSON e Excel).</p>
+            <Field label="Digite EXCLUIR para confirmar">
+              <input className="input" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+            </Field>
+          </div>
+        </Modal>
+      )}
       {edit && (
         <Modal
           open
@@ -375,7 +479,7 @@ function CollaboratorsCard() {
               <input type="email" className="input" value={edit.email ?? ''} onChange={(e) => setEdit({ ...edit, email: e.target.value })} />
             </Field>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={edit.ativo} onChange={(e) => setEdit({ ...edit, ativo: e.target.checked })} /> Ativo
+              <input type="checkbox" checked={edit.ativo} onChange={(e) => setEdit({ ...edit, ativo: e.target.checked })} /> Ativo (desmarcado = desligado)
             </label>
           </div>
         </Modal>

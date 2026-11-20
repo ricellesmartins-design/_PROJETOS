@@ -5,7 +5,7 @@ import { db } from '../lib/db';
 import { uid } from '../lib/id';
 import { asDate, asNumber, asText, normKey, readWorkbook, type CellValue, type Grid } from '../excel/read';
 import { ACTIVITY_STATUSES, type Activity, type ActivityStatus, type Collaborator, type CostCenter, type User } from '../types';
-import { computeEstHours, computeRealHours } from './activities';
+import { ABSENCE_CODE, ABSENCE_DESC, computeEstHours, computeRealHours } from './activities';
 
 export interface ParsedActivity {
   codigo: string;
@@ -71,6 +71,21 @@ function hoursFrom(c: CellValue | undefined): { value?: number; auto?: number } 
   return { value, auto: m ? Number(m[1]) : undefined };
 }
 
+/** Linha de atestado médico / afastamento (por ID, descrição ou status). */
+export function isAbsenceText(parts: string[]): boolean {
+  const t = normKey(parts.join(' '));
+  return t.includes(ABSENCE_CODE) || /ATESTAD|AFASTAD|AFASTAMENTO|LICENCA MEDICA|AUXILIO DOENCA/.test(t);
+}
+
+const MONTHS = 'JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ|JANEIRO|FEVEREIRO|MARCO|ABRIL|MAIO|JUNHO|JULHO|AGOSTO|SETEMBRO|OUTUBRO|NOVEMBRO|DEZEMBRO';
+/** "ANTÔNIO DOS ANJOS NOV-2026" → "ANTÔNIO DOS ANJOS" (quando o cabeçalho não traz o nome). */
+export function nameFromSheet(sheet: string): string {
+  return sheet
+    .replace(new RegExp(`[\\s_-]*(${MONTHS})[\\s_./-]*\\d{2,4}\\s*$`, 'i'), '')
+    .replace(/\s*\(\d+\)\s*$/, '')
+    .trim();
+}
+
 export function parseGrids(grids: Grid[]): { sheets: ParsedSheet[]; costCenters: CostCenter[] } {
   const sheets: ParsedSheet[] = [];
   let costCenters: CostCenter[] = [];
@@ -124,9 +139,12 @@ export function parseGrids(grids: Grid[]): { sheets: ParsedSheet[]; costCenters:
       if (!codigo || !descricao || normKey(codigo) === 'TOTAL') continue;
       const eh = hoursFrom(r[ix.eh]);
       const hr = hoursFrom(r[ix.hr]);
+      // Só ID, descrição ou status identificam o afastamento (a observação de uma atividade comum pode citar "afastado").
+      const ausencia = isAbsenceText([codigo, descricao, asText(r[ix.st])]);
+      const obs = asText(r[ix.obs]);
       rows.push({
-        codigo: codigo.toUpperCase(),
-        descricao,
+        codigo: ausencia ? ABSENCE_CODE : codigo.toUpperCase(),
+        descricao: ausencia ? ABSENCE_DESC : descricao,
         solicitante: asText(r[ix.sol]),
         area: asText(r[ix.area]),
         dataSolicitacao: asDate(r[ix.dsol]),
@@ -142,11 +160,27 @@ export function parseGrids(grids: Grid[]): { sheets: ParsedSheet[]; costCenters:
         horasDiaReal: hr.auto,
         documentosAMP: asText(r[ix.doc]).replace(/\r/g, ''),
         centroCusto: asText(r[ix.cc]),
-        status: normalizeStatus(asText(r[ix.st])),
-        observacao: asText(r[ix.obs]),
+        status: ausencia ? 'Finalizado' : normalizeStatus(asText(r[ix.st])),
+        // No afastamento, guarda o texto original da planilha na observação.
+        observacao: ausencia && normKey(descricao) !== normKey(ABSENCE_DESC) ? [descricao, obs].filter(Boolean).join(' · ') : obs,
       });
+      if (ausencia) {
+        const x = rows[rows.length - 1];
+        // Sem datas reais, usa as estimadas (e vice-versa) para o período ficar visível.
+        x.inicioReal ??= x.estInicio;
+        x.terminoReal ??= x.estTermino ?? x.inicioReal;
+        x.estInicio ??= x.inicioReal;
+        x.estTermino ??= x.terminoReal;
+        x.horasRealizadas = undefined;
+        x.estHoras = undefined;
+        x.estModo = 'manual';
+        x.realModo = 'manual';
+        x.horasDia = undefined;
+        x.horasDiaReal = undefined;
+        if (!x.terminoReal) x.status = 'Em andamento';
+      }
     }
-    sheets.push({ sheet: g.name, hidden: g.hidden, nome: find('COLABORADOR'), matricula: find('MATRICULA'), funcao: find('FUNCAO'), periodo: find('PERIODO'), rows });
+    sheets.push({ sheet: g.name, hidden: g.hidden, nome: find('COLABORADOR') || nameFromSheet(g.name), matricula: find('MATRICULA'), funcao: find('FUNCAO'), periodo: find('PERIODO'), rows });
   }
   return { sheets, costCenters };
 }
@@ -196,8 +230,14 @@ export function compare(sheets: ParsedSheet[]): CompareRow[] {
     }
     const collabId = existingCollab?.id ?? novo!.id;
     for (const p of sh.rows) {
-      const key = `${collabId}|${p.codigo}`;
-      const existing = existingCollab ? acts.find((a) => a.collaboratorId === existingCollab.id && a.codigo.toUpperCase() === p.codigo) : undefined;
+      // A chave é colaborador + ID: o mesmo ID em colaboradores diferentes são atividades distintas.
+      // Afastamentos usam sempre o mesmo ID, então o período (data de início) também entra na chave.
+      const absence = p.codigo === ABSENCE_CODE;
+      const inicio = p.inicioReal ?? p.estInicio ?? '';
+      const key = absence ? `${collabId}|${p.codigo}|${inicio}` : `${collabId}|${p.codigo}`;
+      const existing = existingCollab
+        ? acts.find((a) => a.collaboratorId === existingCollab.id && a.codigo.toUpperCase() === p.codigo && (!absence || (a.inicioReal ?? a.estInicio ?? '') === inicio))
+        : undefined;
       const diffs: CompareRow['diffs'] = [];
       if (existing) {
         const sys: Record<string, unknown> = { ...existing, estHoras: computeEstHours(existing), horasRealizadas: computeRealHours(existing) };

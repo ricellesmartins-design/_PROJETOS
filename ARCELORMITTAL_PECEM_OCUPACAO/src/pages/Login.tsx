@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { KeyRound, LogIn, ShieldCheck, UserPlus } from 'lucide-react';
 import { ALLOWED_DOMAINS, forgotPassword, isAllowedDomain, isEmailFormat, login, register, roleForEmail, ROLE_LABEL } from '../lib/auth';
 import { Alert, Button, Field } from '../components/ui';
+import { InstallButton, ThemeToggle } from '../components/AppButtons';
 import logo from '../templates/logo-idg-default.png';
 
 export default function Login({ onLogged }: { onLogged: () => void }) {
@@ -39,9 +40,10 @@ export default function Login({ onLogged }: { onLogged: () => void }) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-idg-navy via-idg-blue to-slate-800 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-7 shadow-2xl">
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-7 shadow-2xl">
+        <ThemeToggle className="absolute right-3 top-3" />
         <div className="mb-5 flex flex-col items-center text-center">
-          <img src={logo} alt="IDG Engenharia" className="h-16" />
+          <img src={logo} alt="IDG Engenharia" className="keep-light h-16 rounded-lg bg-white p-1" />
           <h1 className="mt-3 text-lg font-bold text-idg-navy">Gestão de Atividades e Férias</h1>
           <p className="text-sm text-slate-500">Contrato AMP · ArcelorMittal Pecém</p>
         </div>
@@ -118,6 +120,9 @@ export default function Login({ onLogged }: { onLogged: () => void }) {
             </button>
           )}
         </form>
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <InstallButton variant="full" />
+        </div>
       </div>
     </div>
   );

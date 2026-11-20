@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileSpreadsheet, FileText } from 'lucide-react';
 import { useDb, useSession, collaboratorName } from '../lib/store';
 import { addDays, diffDays, findHoliday, fmtBR, isWeekend, MONTHS_ABBR, todayISO, weekStart } from '../lib/dates';
-import { dailyLoad, executionWindow, isClosed, isLate } from '../services/activities';
+import { dailyLoad, executionWindow, isAbsence, isClosed, isLate } from '../services/activities';
 import { visibleActivities, visibleCollaborators, visibleVacations } from '../services/views';
 import { ACTIVITY_STATUSES, type Activity } from '../types';
 import { Badge, Button, Card, Empty, Field, cx, useAction } from '../components/ui';
@@ -55,7 +55,7 @@ export default function LoadMap() {
     if (isWeekend(d) || findHoliday(d, settings.feriadosExtras)) return { h: 0, n: 0 };
     const on = list.filter((a) => {
       const w = executionWindow(a, today)!;
-      return w.start <= d && w.end >= d && a.status !== 'Cancelado';
+      return w.start <= d && w.end >= d && a.status !== 'Cancelado' && !isAbsence(a);
     });
     return { h: on.reduce((s, a) => s + dailyLoad(a), 0), n: on.length };
   };
@@ -203,6 +203,9 @@ export default function LoadMap() {
           <span className="hatch inline-block h-3 w-5 rounded" /> férias aprovadas
         </span>
         <span className="flex items-center gap-1">
+          <span className="inline-block h-3 w-5 rounded bg-pink-300" /> afastado | atestado (ID 0510-0000)
+        </span>
+        <span className="flex items-center gap-1">
           <span className="inline-block h-3 w-5 rounded bg-red-500" /> &gt; {settings.limiteDia} h/dia
         </span>
         <span className="flex items-center gap-1">
@@ -254,17 +257,22 @@ export default function LoadMap() {
                       </div>
                       {days.map((d) => {
                         const onVac = myVac.some((p) => p.inicio <= d && p.fim >= d);
+                        const onAbs = !onVac && g.list.some((a) => {
+                          if (!isAbsence(a) || a.status === 'Cancelado') return false;
+                          const w = executionWindow(a, today);
+                          return !!w && w.start <= d && w.end >= d;
+                        });
                         const { h, n } = loadOf(g.list, d);
                         const off = isWeekend(d) || !!findHoliday(d, settings.feriadosExtras);
-                        const color = onVac ? 'hatch' : off ? 'bg-slate-100' : h === 0 ? 'bg-slate-200' : h > settings.limiteDia ? 'bg-red-500 text-white' : h >= settings.limiteDia * 0.75 ? 'bg-emerald-500 text-white' : 'bg-amber-300';
+                        const color = onVac ? 'hatch' : onAbs && !off ? 'bg-pink-300 text-pink-900' : off ? 'bg-slate-100' : h === 0 ? 'bg-slate-200' : h > settings.limiteDia ? 'bg-red-500 text-white' : h >= settings.limiteDia * 0.75 ? 'bg-emerald-500 text-white' : 'bg-amber-300';
                         return (
                           <div
                             key={d}
-                            title={`${fmtBR(d)} · ${onVac ? 'férias' : `${h.toFixed(1)} h em ${n} atividade(s)`}`}
+                            title={`${fmtBR(d)} · ${onVac ? 'férias' : onAbs ? 'afastado | atestado' : `${h.toFixed(1)} h em ${n} atividade(s)`}`}
                             className={cx('m-[1px] flex shrink-0 items-center justify-center rounded-sm text-[9px] font-semibold', color, n >= 2 && !onVac && 'ring-2 ring-inset ring-violet-600')}
                             style={{ width: DAY_W - 2, height: 22 }}
                           >
-                            {!off && !onVac && h > 0 ? (h % 1 ? h.toFixed(1) : h) : ''}
+                            {!off && !onVac && onAbs ? 'AT' : !off && !onVac && h > 0 ? (h % 1 ? h.toFixed(1) : h) : ''}
                           </div>
                         );
                       })}

@@ -44,7 +44,7 @@ export default function AccessLink({ acesso, onDone, onCancel }: { acesso: strin
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-idg-navy via-idg-blue to-slate-800 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-7 shadow-2xl">
         <div className="mb-5 flex flex-col items-center text-center">
-          <img src={logo} alt="IDG Engenharia" className="h-16" />
+          <img src={logo} alt="IDG Engenharia" className="keep-light h-16 rounded-lg bg-white p-1" />
           <h1 className="mt-3 text-lg font-bold text-idg-navy">{cadastro ? 'Bem-vindo! Complete seu cadastro' : 'Criar nova senha'}</h1>
           <p className="text-sm text-slate-500">Gestão de Atividades e Férias · Contrato AMP</p>
         </div>

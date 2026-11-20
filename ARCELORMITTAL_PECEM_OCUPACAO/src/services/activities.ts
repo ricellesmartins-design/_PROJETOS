@@ -53,7 +53,13 @@ export function executionWindow(a: Activity, today = todayISO()): { start: strin
 }
 
 /** Horas/dia alocadas para o mapa de carga. */
+/** Afastamento / atestado médico: lançado com ID fixo, não conta como carga de trabalho. */
+export const ABSENCE_CODE = '0510-0000';
+export const ABSENCE_DESC = 'Afastado | Atestado';
+export const isAbsence = (a: Pick<Activity, 'codigo'>) => a.codigo.trim().toUpperCase() === ABSENCE_CODE;
+
 export function dailyLoad(a: Activity): number {
+  if (isAbsence(a)) return 0;
   if (a.status === 'Cancelado' || a.status === 'Aguardando Cliente') return 0;
   if (a.estModo === 'auto' && a.horasDia) return a.horasDia;
   const h = computeEstHours(a);
@@ -108,7 +114,8 @@ export function validateActivity(a: Activity, all: Activity[]): string[] {
   if (a.estInicio && a.estTermino && a.estTermino < a.estInicio) errs.push('Estimativa de término anterior à estimativa de início.');
   if (a.inicioReal && a.terminoReal && a.terminoReal < a.inicioReal) errs.push('Término real anterior ao início real.');
   if (a.status === 'Finalizado' && !a.terminoReal) errs.push('Atividade finalizada precisa de Término Real.');
-  const dup = all.find((x) => x.id !== a.id && x.codigo.trim().toUpperCase() === a.codigo.trim().toUpperCase() && x.collaboratorId === a.collaboratorId);
+  // O ID de afastamento pode se repetir (um lançamento por período de atestado).
+  const dup = !isAbsence(a) && all.find((x) => x.id !== a.id && x.codigo.trim().toUpperCase() === a.codigo.trim().toUpperCase() && x.collaboratorId === a.collaboratorId);
   if (dup) errs.push(`Já existe a atividade ${a.codigo} para este colaborador.`);
   return errs;
 }
