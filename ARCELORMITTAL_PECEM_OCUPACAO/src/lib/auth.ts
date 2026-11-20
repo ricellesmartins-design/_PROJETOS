@@ -1,6 +1,6 @@
 // Autenticação (Supabase Auth) e controle de acesso por perfil.
 // A restrição de domínio é aplicada no cliente, na Edge Function de cadastro e por trigger no banco.
-import { supabase, errMsg } from './supabase';
+import { supabase, errMsg, invokeFunction } from './supabase';
 import { db, fromRow, type Profile } from './db';
 import type { Role } from '../types';
 
@@ -97,6 +97,34 @@ export async function adminResetPassword(userId: string, nova: string) {
   }
   if (data?.error) throw new Error(data.error);
 }
+
+// Recuperação de senha e convites (Edge Function "signup") ------------------------------
+
+/** Envia o link de nova senha para o e-mail (a resposta não revela se o e-mail existe). */
+export async function forgotPassword(email: string) {
+  const e = normalizeEmail(email);
+  if (!isEmailFormat(e)) throw new Error('Informe um e-mail válido.');
+  if (!isAllowedDomain(e)) throw new Error(domainError());
+  await invokeFunction('signup', { action: 'forgot', email: e });
+}
+
+export type AccessInfo = { email: string; tipo: 'convite' | 'senha'; precisaCadastro: boolean; nome: string; role: Role };
+export const accessInfo = (acesso: string) => invokeFunction<AccessInfo>('signup', { action: 'token_info', acesso });
+
+/** Usa o link de convite/nova senha: grava a senha (e o cadastro, se for o primeiro acesso) e entra. */
+export async function completeAccess(acesso: string, params: { password: string; nome?: string; matricula?: string; funcao?: string }) {
+  if (params.password.length < 8) throw new Error('A senha deve ter pelo menos 8 caracteres.');
+  const r = await invokeFunction<{ email: string; vinculoPendente?: boolean }>('signup', { action: 'complete', acesso, ...params });
+  await supabase.auth.signOut();
+  await login(r.email, params.password);
+  return r;
+}
+
+export type Invite = { id: string; email: string; nome: string; role: Role; collaboratorId: string | null; por: string; em: string; aceitoEm: string | null; status: 'Pendente' | 'Aceito' | 'Expirado'; expira: string | null };
+export const listInvites = async () => (await invokeFunction<{ convites: Invite[] }>('signup', { action: 'invites' })).convites;
+export const sendInvite = (p: { email: string; role: Role; nome?: string; collaboratorId?: string }) =>
+  invokeFunction<{ link: string; enviado: boolean; erroEnvio?: string }>('signup', { action: 'invite', ...p, email: normalizeEmail(p.email) });
+export const cancelInvite = (userId: string) => invokeFunction('signup', { action: 'cancel_invite', userId });
 
 // Permissões (a autorização efetiva é garantida pelo RLS no banco) --------------------
 export const can = {

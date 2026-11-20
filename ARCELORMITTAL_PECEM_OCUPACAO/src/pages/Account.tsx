@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ThemePicker } from '../components/AppButtons';
 import { Bell, BellOff, Download, KeyRound, MonitorDown, Send } from 'lucide-react';
 import { useDb, useSession, collaboratorName } from '../lib/store';
 import { changePassword, ROLE_LABEL } from '../lib/auth';
@@ -46,6 +47,13 @@ export default function Account() {
               {realUser.collaboratorId ? collaboratorName(realUser.collaboratorId) : <Badge color="yellow">Aguardando vínculo pelo coordenador</Badge>}
             </div>
           )}
+        </div>
+      </Card>
+
+      <Card title="Aparência">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <ThemePicker />
+          <span className="text-xs text-slate-500">Automático segue o tema claro/escuro do Windows. A escolha fica salva neste navegador.</span>
         </div>
       </Card>
 
