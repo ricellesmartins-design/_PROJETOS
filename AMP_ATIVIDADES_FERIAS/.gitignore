@@ -1,0 +1,10 @@
+node_modules
+dist
+*.log
+*.tsbuildinfo
+.env.local
+# Dados reais (nomes, matrículas, atividades) ficam só no banco, protegidos por RLS.
+# O repositório é público: não versionar a carga inicial.
+supabase/migrations/003_seed.sql
+supabase/scripts/gen_seed.py
+supabase/scripts/*.json
