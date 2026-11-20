@@ -1,7 +1,32 @@
-// Backup dos dados por e-mail (JSON completo + CSVs de atividades e férias).
+// Backup completo por e-mail (JSON + Excel com uma aba por tabela).
+// Vai para o e-mail das configurações e sempre também para ricellesmartins@gmail.com.
 // Disparado diariamente pelo pg_cron (x-cron-secret) ou manualmente pelo coordenador (JWT).
 // Envio via Resend: requer o segredo RESEND_API_KEY nas Edge Functions do projeto.
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import * as XLSX from 'npm:xlsx@0.18.5';
+
+const FIXED_TO = 'ricellesmartins@gmail.com';
+const SHEETS: [string, string][] = [
+  ['activities', 'Atividades'],
+  ['date_change_logs', 'Alterações de data'],
+  ['vacations', 'Férias'],
+  ['collaborators', 'Colaboradores'],
+  ['cost_centers', 'Centros de custo'],
+  ['profiles', 'Usuários'],
+  ['hr_imports', 'Importações RH'],
+  ['app_settings', 'Configurações'],
+];
+
+// deno-lint-ignore no-explicit-any
+function xlsxB64(dump: Record<string, any>) {
+  const wb = XLSX.utils.book_new();
+  for (const [t, name] of SHEETS) {
+    // deno-lint-ignore no-explicit-any
+    const rows = ((dump[t] ?? []) as any[]).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v != null && typeof v === 'object' ? JSON.stringify(v).slice(0, 32000) : v])));
+    XLSX.utils.book_append_sheet(wb, rows.length ? XLSX.utils.json_to_sheet(rows) : XLSX.utils.aoa_to_sheet([['Sem registros']]), name);
+  }
+  return XLSX.write(wb, { type: 'base64', bookType: 'xlsx' }) as string;
+}
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -17,17 +42,6 @@ function b64(s: string) {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(bin);
 }
-// deno-lint-ignore no-explicit-any
-function csv(rows: any[]) {
-  if (!rows.length) return '';
-  const cols = Object.keys(rows[0]);
-  const esc = (v: unknown) => {
-    const t = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
-    return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
-  };
-  return '﻿' + [cols.join(';'), ...rows.map((r) => cols.map((c) => esc(r[c])).join(';'))].join('\r\n');
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
@@ -49,7 +63,7 @@ Deno.serve(async (req) => {
     dump[t] = data;
   }
   const settings = (dump.app_settings as { data: Record<string, unknown> }[])[0]?.data ?? {};
-  const to = String(settings.backupEmail ?? 'ricellesmartins@gmail.com');
+  const to = [...new Set([String(settings.backupEmail || FIXED_TO).trim().toLowerCase(), FIXED_TO])];
   const key = Deno.env.get('RESEND_API_KEY');
   const stamp = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 16).replace('T', '_').replace(':', 'h');
   if (!key) {
@@ -65,17 +79,16 @@ Deno.serve(async (req) => {
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: Deno.env.get('BACKUP_FROM') ?? 'Backup AMP <onboarding@resend.dev>',
-      to: [to],
+      to,
       subject: `Backup · Gestão de Atividades e Férias AMP · ${stamp}`,
       html: `<p>Backup automático (${origem}) do sistema de Gestão de Atividades e Férias — Contrato AMP.</p>
         <ul><li>Atividades: ${acts.length}</li><li>Solicitações de férias: ${vacs.length}</li>
         <li>Justificativas de datas: ${(dump.date_change_logs as unknown[]).length}</li>
         <li>Colaboradores: ${(dump.collaborators as unknown[]).length}</li></ul>
-        <p>Para restaurar, use o arquivo JSON em anexo (Configurações › Backup › Restaurar).</p>`,
+        <p>Em anexo: backup completo em JSON e em Excel (uma aba por tabela).</p>`,
       attachments: [
         { filename: `backup_amp_${stamp}.json`, content: b64(JSON.stringify(dump, null, 1)) },
-        { filename: `atividades_${stamp}.csv`, content: b64(csv(acts)) },
-        { filename: `ferias_${stamp}.csv`, content: b64(csv(vacs)) },
+        { filename: `backup_amp_${stamp}.xlsx`, content: xlsxB64(dump) },
       ],
     }),
   });

@@ -41,21 +41,9 @@ call npm run build || (echo [ERRO] Build falhou. Nada foi publicado. & goto :fim
 
 echo.
 echo [5/5] Publicando no Netlify...
-rem Pasta .netlify propria deste app, para nao misturar com o site MGR Projetos da pasta _PROJETOS
-if not exist ".netlify" mkdir ".netlify"
-if not exist ".netlify\state.json" (
-  echo Primeira publicacao: criando o site no Netlify...
-  call npx.cmd -y netlify-cli sites:create --name arcelormittal-pecem-ocupacao
-  if not exist ".netlify\state.json" (
-    echo Esse nome ja existe no Netlify. Digite outro nome quando pedir:
-    call npx.cmd -y netlify-cli sites:create
-  )
-  if not exist ".netlify\state.json" (
-    echo [ERRO] Nao foi possivel criar o site. Se aparecer "Unauthorized", rode: npx.cmd netlify-cli login
-    goto :fim
-  )
-)
-call npx.cmd -y netlify-cli deploy --prod --dir dist
+rem Site no Netlify: https://idg-amp-gestao.netlify.app (nome do site no Netlify)
+set "NETLIFY_SITE=idg-amp-gestao"
+call npx.cmd -y netlify-cli deploy --prod --dir dist --site %NETLIFY_SITE%
 if errorlevel 1 (
   echo [ERRO] Falha na publicacao. Se aparecer "Unauthorized", rode uma vez: npx.cmd netlify-cli login
   goto :fim
@@ -77,7 +65,7 @@ if defined GIT_OK (
 
 echo.
 echo ============================================================
-echo  PRONTO! Nova versao publicada (endereco "Production URL" acima).
+echo  PRONTO! Nova versao publicada em https://idg-amp-gestao.netlify.app
 echo  O aplicativo instalado atualiza sozinho ao ser aberto.
 echo ============================================================
 goto :fim

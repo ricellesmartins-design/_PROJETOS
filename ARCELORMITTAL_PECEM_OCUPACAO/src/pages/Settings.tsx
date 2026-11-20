@@ -6,7 +6,7 @@ import { adminResetPassword, ROLE_LABEL } from '../lib/auth';
 import { type Profile } from '../lib/db';
 import { uid } from '../lib/id';
 import { fmtBR, fmtDateTimeBR, holidaysOf, todayISO } from '../lib/dates';
-import { download } from '../excel/common';
+import { downloadBackupExcel, downloadBackupJson, resetSystem, type ResetScope } from '../lib/backup';
 import type { Collaborator, CostCenter, Holiday, Role, Settings as SettingsT } from '../types';
 import defaultLogo from '../templates/logo-idg-default.png';
 import defaultSeals from '../templates/selos-iso-default.png';
@@ -80,20 +80,16 @@ export default function Settings() {
 
   const save = () => run(() => db.saveSettings({ ...s, lembretes: [...s.lembretes].sort() }), 'Configurações salvas.');
 
-  const downloadBackup = () => {
-    const dump = {
-      geradoEm: new Date().toISOString(),
-      settings: db.settings,
-      collaborators: db.all('collaborators'),
-      costCenters: db.all('costCenters'),
-      activities: db.all('activities'),
-      dateChangeLogs: db.all('dateChangeLogs'),
-      vacations: db.all('vacations'),
-      hrImports: db.all('hrImports'),
-      profiles: db.all('profiles'),
-    };
-    download(new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' }), `backup_amp_${new Date().toISOString().slice(0, 10)}.json`);
-  };
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetScope, setResetScope] = useState<ResetScope>('movimento');
+  const [resetText, setResetText] = useState('');
+  const doReset = () =>
+    run(async () => {
+      const r = await resetSystem(resetScope);
+      setResetOpen(false);
+      setResetText('');
+      return r;
+    }, 'Sistema zerado. O backup completo foi baixado antes da limpeza.');
 
   return (
     <div className="space-y-5">
@@ -168,8 +164,8 @@ export default function Settings() {
       </Card>
 
       <Card title={<span className="inline-flex items-center gap-2"><Database className="h-4 w-4" /> Backup</span>}>
-        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
-          <Field label="E-mail que recebe o backup diário (06:00)" hint="JSON completo + CSV de atividades e férias.">
+        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto] md:items-end">
+          <Field label="E-mail que recebe o backup diário (06:00)" hint="Backup completo em JSON e Excel. Uma cópia vai sempre também para ricellesmartins@gmail.com.">
             <input type="email" className="input" value={s.backupEmail} onChange={(e) => set('backupEmail', e.target.value)} />
           </Field>
           <Button
@@ -182,11 +178,60 @@ export default function Settings() {
           >
             Enviar backup agora
           </Button>
-          <Button variant="secondary" icon={<Database className="h-4 w-4" />} onClick={downloadBackup}>
+          <Button variant="secondary" icon={<Database className="h-4 w-4" />} onClick={() => downloadBackupJson()}>
             Baixar backup (JSON)
+          </Button>
+          <Button variant="secondary" icon={<Database className="h-4 w-4" />} loading={busy} onClick={() => run(() => downloadBackupExcel(), 'Backup em Excel gerado.')}>
+            Baixar backup (Excel)
+          </Button>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">Inclui atividades (serviços), justificativas de datas, férias (com períodos e histórico), colaboradores, centros de custo, usuários, importações do RH e configurações.</p>
+      </Card>
+
+      <Card title={<span className="inline-flex items-center gap-2 text-red-700"><Trash2 className="h-4 w-4" /> Zerar o sistema</span>}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="max-w-3xl text-sm text-slate-600">
+            Apaga os dados para começar do zero. Antes de apagar, o sistema baixa automaticamente o backup completo (JSON e Excel). Usuários, logins e configurações são mantidos.
+          </p>
+          <Button variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setResetOpen(true)}>
+            Zerar o sistema…
           </Button>
         </div>
       </Card>
+      <Modal
+        open={resetOpen}
+        onClose={() => setResetOpen(false)}
+        title="Zerar o sistema"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setResetOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" icon={<Trash2 className="h-4 w-4" />} loading={busy} disabled={resetText !== 'ZERAR'} onClick={doReset}>
+              Baixar backup e zerar
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <Alert kind="error">Esta ação apaga os dados de todos os usuários e não pode ser desfeita pelo sistema. Guarde o backup que será baixado.</Alert>
+          <label className="flex items-start gap-2">
+            <input type="radio" className="mt-1" checked={resetScope === 'movimento'} onChange={() => setResetScope('movimento')} />
+            <span>
+              <b>Apagar movimentação</b> ({db.all('activities').length} atividades, {db.all('vacations').length} solicitações de férias, {db.all('dateChangeLogs').length} justificativas e as importações do RH). Mantém colaboradores e centros de custo.
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input type="radio" className="mt-1" checked={resetScope === 'tudo'} onChange={() => setResetScope('tudo')} />
+            <span>
+              <b>Apagar tudo</b>: a movimentação acima e também {db.all('collaborators').length} colaboradores e {db.all('costCenters').length} centros de custo. Os usuários continuam, mas ficam sem colaborador vinculado.
+            </span>
+          </label>
+          <Field label='Para confirmar, digite ZERAR'>
+            <input className="input" value={resetText} onChange={(e) => setResetText(e.target.value.toUpperCase())} placeholder="ZERAR" />
+          </Field>
+        </div>
+      </Modal>
 
       <Card title="Feriados">
         <p className="mb-2 text-sm text-slate-600">Feriados nacionais e do Ceará já são calculados automaticamente. Inclua aqui feriados municipais (Caucaia / São Gonçalo do Amarante) ou pontos facultativos.</p>
