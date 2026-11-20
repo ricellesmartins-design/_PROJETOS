@@ -6,7 +6,7 @@ aprovação e formulário **ADM-PF158**, conciliação com o RH, relatórios exe
 
 - **Frontend:** Vite + React 18 + TS + Tailwind + lucide-react; Excel gerado direto no OpenXML (jszip) a partir dos modelos originais.
 - **Backend:** Supabase (PostgreSQL + Auth + Realtime + Edge Functions + pg_cron), plano gratuito.
-- **Publicação:** GitHub Pages (workflow `.github/workflows/deploy-amp.yml`), instalável no Windows como aplicativo (PWA).
+- **Publicação:** Netlify (deploy automático a partir do GitHub), instalável no Windows como aplicativo (PWA).
 
 ## Perfis
 
@@ -56,11 +56,22 @@ npm run build    # gera dist/
 As variáveis `VITE_SUPABASE_URL`, `VITE_SUPABASE_KEY` (chave *publishable*) e `VITE_VAPID_PUBLIC` estão em `.env.production`/`.env.development`.
 São públicas por natureza; a proteção dos dados é feita pelo RLS.
 
-## Publicação (GitHub Pages)
+## Publicação (Netlify)
 
-1. No GitHub: **Settings › Pages › Build and deployment › Source: GitHub Actions** (uma vez).
-2. Cada push na branch `main` que altere `AMP_ATIVIDADES_FERIAS/` roda testes, build e publica em
-   `https://ricellesmartins-design.github.io/_PROJETOS/`.
+Fluxo: **GitHub** guarda o código › **Netlify** publica automaticamente a cada push na `main` › **Supabase** é o banco.
+A configuração do Netlify está em `netlify.toml` na raiz do repositório (base `ARCELORMITTAL_PECEM_OCUPACAO`, build `npm test && npm run build`, publica `dist`).
+
+Ligar o Netlify (uma vez): app.netlify.com › *Add new site* › *Import an existing project* › GitHub › `_PROJETOS` › branch `main` › *Deploy*.
+
+## Pasta no Windows e atualizações
+
+Pasta local: `C:\Users\Ricelles\OneDrive\0_ IA's\_PROJETOS\ARCELORMITTAL_PECEM_OCUPACAO`
+
+| Arquivo | Para quê |
+|---|---|
+| `INSTALAR.bat` | Uma vez: liga a pasta `_PROJETOS` ao GitHub e instala as dependências (requer Git e Node.js LTS). |
+| `ATUALIZAR.bat` | Baixa a última versão, roda testes e build e envia suas alterações ao GitHub; o Netlify publica sozinho. |
+| `RODAR_LOCAL.bat` | Abre o app no seu computador (http://localhost:5173) para testar antes de publicar. |
 
 ## Instalar no Windows
 
