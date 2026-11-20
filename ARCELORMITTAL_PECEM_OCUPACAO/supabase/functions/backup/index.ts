@@ -1,7 +1,7 @@
 // Backup completo por e-mail (JSON + Excel com uma aba por tabela).
 // Vai para o e-mail das configurações e sempre também para ricellesmartins@gmail.com.
 // Disparado diariamente pelo pg_cron (x-cron-secret) ou manualmente pelo coordenador (JWT).
-// Envio via Resend: requer o segredo RESEND_API_KEY nas Edge Functions do projeto.
+// Envio via Resend: chave no segredo RESEND_API_KEY ou na tabela app_secrets (resend_api_key).
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as XLSX from 'npm:xlsx@0.18.5';
 
@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
   }
   const settings = (dump.app_settings as { data: Record<string, unknown> }[])[0]?.data ?? {};
   const to = [...new Set([String(settings.backupEmail || FIXED_TO).trim().toLowerCase(), FIXED_TO])];
-  const key = Deno.env.get('RESEND_API_KEY');
+  const key = Deno.env.get('RESEND_API_KEY') || s.resend_api_key;
   const stamp = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 16).replace('T', '_').replace(':', 'h');
   if (!key) {
     await admin.from('job_runs').insert({ job: 'backup', detail: { ok: false, erro: 'RESEND_API_KEY não configurada', origem } });
