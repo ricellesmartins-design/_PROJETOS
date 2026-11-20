@@ -11,11 +11,14 @@ OUT = 'src/templates/'
 
 # 1) Relatório de atividades: partes reutilizadas pelo gerador.
 z = zipfile.ZipFile(src_ativ)
-sheet = z.read('xl/worksheets/sheet8.xml').decode('utf-8')  # aba "ATIVIDADES (2)" com todas as colunas visíveis
+sheet = z.read('xl/worksheets/sheet6.xml').decode('utf-8')  # aba oficial ativa (colunas de estimativa F:H ocultas)
 sheet = re.sub(r'<sheetData>.*</sheetData>', '<sheetData/>', sheet, flags=re.S)
 sheet = sheet.replace('<legacyDrawingHF r:id="rId3"/>', '')
 sheet = sheet.replace(' r:id="rId1"/><headerFooter>', '/><headerFooter>')  # sem printerSettings
 sheet = sheet.replace('&amp;G', '')  # remove imagem de assinatura do rodapé
+# a formatação condicional é reinserida pelo gerador com o intervalo real de linhas
+sheet = re.sub(r'<conditionalFormatting .*?</conditionalFormatting>', '', sheet, flags=re.S)
+sheet = re.sub(r'<extLst>.*</extLst>', '', sheet, flags=re.S)
 sheet = re.sub(r'<selection [^>]*/>', '<selection activeCell="A5" sqref="A5"/>', sheet)
 # formatação condicional do centro de custo (validação contra a aba Planilha1) vinda da aba ativa
 s6 = z.read('xl/worksheets/sheet6.xml').decode('utf-8')
@@ -25,7 +28,7 @@ open(OUT + 'atividades_cf.xml', 'w').write(cf + '\n' + ext)
 open(OUT + 'atividades_sheet.xml', 'w').write(sheet)
 open(OUT + 'atividades_styles.xml', 'wb').write(z.read('xl/styles.xml'))
 open(OUT + 'atividades_theme.xml', 'wb').write(z.read('xl/theme/theme1.xml'))
-open(OUT + 'atividades_drawing.xml', 'wb').write(z.read('xl/drawings/drawing7.xml'))
+open(OUT + 'atividades_drawing.xml', 'wb').write(z.read('xl/drawings/drawing6.xml'))
 open(OUT + 'logo-idg-default.png', 'wb').write(z.read('xl/media/image1.png'))
 
 # 2) Formulário de férias: arquivo completo, sem metadados pessoais/SharePoint.

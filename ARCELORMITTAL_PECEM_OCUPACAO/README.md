@@ -6,7 +6,7 @@ aprovação e formulário **ADM-PF158**, conciliação com o RH, relatórios exe
 
 - **Frontend:** Vite + React 18 + TS + Tailwind + lucide-react; Excel gerado direto no OpenXML (jszip) a partir dos modelos originais.
 - **Backend:** Supabase (PostgreSQL + Auth + Realtime + Edge Functions + pg_cron), plano gratuito.
-- **Publicação:** Netlify (deploy automático a partir do GitHub), instalável no Windows como aplicativo (PWA).
+- **Publicação:** Netlify (publicado pelo `ATUALIZAR.bat` via Netlify CLI; GitHub guarda o código), instalável no Windows como aplicativo (PWA).
 
 ## Perfis
 
@@ -58,10 +58,10 @@ São públicas por natureza; a proteção dos dados é feita pelo RLS.
 
 ## Publicação (Netlify)
 
-Fluxo: **GitHub** guarda o código › **Netlify** publica automaticamente a cada push na `main` › **Supabase** é o banco.
-A configuração do Netlify está em `netlify.toml` na raiz do repositório (base `ARCELORMITTAL_PECEM_OCUPACAO`, build `npm test && npm run build`, publica `dist`).
-
-Ligar o Netlify (uma vez): app.netlify.com › *Add new site* › *Import an existing project* › GitHub › `_PROJETOS` › branch `main` › *Deploy*.
+Fluxo: **Supabase** é o banco › **Netlify** hospeda o site › **GitHub** guarda uma cópia do código.
+O `ATUALIZAR.bat` roda testes e build e publica a pasta `dist` com `netlify-cli deploy --prod`
+(mesmo método do `publicar_mgr_projetos.cmd`). Na primeira vez ele cria o site `arcelormittal-pecem-ocupacao`
+e grava o vínculo em `.netlify/state.json` desta pasta. Cabeçalhos de cache ficam em `public/_headers`.
 
 ## Pasta no Windows e atualizações
 
@@ -69,8 +69,8 @@ Pasta local: `C:\Users\Ricelles\OneDrive\0_ IA's\_PROJETOS\ARCELORMITTAL_PECEM_O
 
 | Arquivo | Para quê |
 |---|---|
-| `INSTALAR.bat` | Uma vez: liga a pasta `_PROJETOS` ao GitHub e instala as dependências (requer Git e Node.js LTS). |
-| `ATUALIZAR.bat` | Baixa a última versão, roda testes e build e envia suas alterações ao GitHub; o Netlify publica sozinho. |
+| `INSTALAR.bat` | Uma vez: instala as dependências, faz login no Netlify e liga a pasta `_PROJETOS` ao GitHub (Git é opcional). |
+| `ATUALIZAR.bat` | Baixa a última versão do GitHub, roda testes e build, publica no Netlify e guarda as alterações no GitHub. |
 | `RODAR_LOCAL.bat` | Abre o app no seu computador (http://localhost:5173) para testar antes de publicar. |
 
 ## Instalar no Windows

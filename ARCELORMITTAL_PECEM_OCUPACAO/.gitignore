@@ -8,3 +8,4 @@ dist
 supabase/migrations/003_seed.sql
 supabase/scripts/gen_seed.py
 supabase/scripts/*.json
+.netlify

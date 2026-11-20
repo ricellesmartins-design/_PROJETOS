@@ -5,23 +5,36 @@ import { useDb, useSession } from '../lib/store';
 import { addMonths, monthLabel, todayISO } from '../lib/dates';
 import { visibleActivities, visibleCollaborators } from '../services/views';
 import { applyExportFilter, monthsBetween, type ExportFilter } from '../services/exportFilters';
-import { exportActivities, planSheets } from '../excel/exportActivities';
-import { exportAllocation } from '../excel/exportAllocation';
+import JSZip from 'jszip';
+import { buildActivitiesWorkbook, planSheets } from '../excel/exportActivities';
+import { buildAllocationWorkbook } from '../excel/exportAllocation';
+import { download, safeFileName } from '../excel/common';
 import { ACTIVITY_STATUSES, type ActivityStatus } from '../types';
 import { Alert, Button, Modal, cx, useAction } from './ui';
 
 type Layout = 'mes' | 'periodo';
 
+// Nenhum item marcado = sem filtro (todos entram). "marcar todos" marca a lista inteira; "limpar" desmarca.
 function MultiPick({ label, options, value, onChange, render }: { label: string; options: string[]; value: string[]; onChange: (v: string[]) => void; render?: (v: string) => ReactNode }) {
-  const all = !value.length;
+  const allMarked = options.length > 0 && options.every((o) => value.includes(o));
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between">
+      <div className="mb-1 flex items-center justify-between gap-2">
         <span className="label mb-0">{label}</span>
-        <button type="button" className="text-xs text-idg-blue hover:underline" onClick={() => onChange([])}>
-          {all ? 'todos' : `limpar (${value.length})`}
-        </button>
+        <span className="flex gap-2 text-xs">
+          {!allMarked && options.length > 0 && (
+            <button type="button" className="text-idg-blue hover:underline" onClick={() => onChange([...options])}>
+              marcar todos
+            </button>
+          )}
+          {value.length > 0 && (
+            <button type="button" className="text-idg-blue hover:underline" onClick={() => onChange([])}>
+              limpar ({value.length})
+            </button>
+          )}
+        </span>
       </div>
+      {!value.length && <div className="mb-1 text-[11px] text-slate-400">Nenhum marcado = todos</div>}
       <div className="max-h-36 space-y-0.5 overflow-y-auto rounded border border-slate-200 p-1.5">
         {options.map((o) => (
           <label key={o} className={cx('flex items-center gap-2 rounded px-1 text-xs', value.includes(o) && 'bg-blue-50')}>
@@ -52,7 +65,7 @@ export default function ExportDialog({ onClose, initial }: { onClose: () => void
   });
   const [layout, setLayout] = useState<Layout>('mes');
   const [formatoSE, setFormatoSE] = useState(true);
-  const [formatoAloc, setFormatoAloc] = useState(true);
+  const [formatoAloc, setFormatoAloc] = useState(false);
   const [porColab, setPorColab] = useState(false);
 
   const all = visibleActivities(user);
@@ -88,11 +101,20 @@ export default function ExportDialog({ onClose, initial }: { onClose: () => void
   const generate = () =>
     run(async () => {
       const groups = porColab ? selCollabs.map((c) => [c]) : [selCollabs];
+      const periodo = f.from === f.to ? f.from : `${f.from}_a_${f.to}`;
+      const files: { name: string; blob: Blob }[] = [];
       for (const g of groups) {
         const acts = list.filter((a) => g.some((c) => c.id === a.collaboratorId));
-        const hint = `${g.length === 1 ? g[0].nome : 'EQUIPE_AMP'}_${f.from === f.to ? f.from : `${f.from}_a_${f.to}`}`;
-        if (formatoSE) await exportActivities(planSheets(g, acts, layout === 'mes' ? months : []), hint);
-        if (formatoAloc) await exportAllocation({ collaborators: g, activities: acts, months, filtroTexto }, hint);
+        const hint = safeFileName(`${g.length === 1 ? g[0].nome : 'EQUIPE_AMP'}_${periodo}`);
+        if (formatoSE) files.push({ name: `SE-PL-0510-CD001-R0 RELATORIO DE ATIVIDADES_${hint}.xlsx`, blob: await buildActivitiesWorkbook(planSheets(g, acts, layout === 'mes' ? months : [])) });
+        if (formatoAloc) files.push({ name: `Alocacao_Mensal_AMP_${hint}.xlsx`, blob: await buildAllocationWorkbook({ collaborators: g, activities: acts, months, filtroTexto }) });
+      }
+      // Um arquivo baixa direto; vários vão juntos num .zip (o navegador bloqueia downloads múltiplos).
+      if (files.length === 1) download(files[0].blob, files[0].name);
+      else {
+        const zip = new JSZip();
+        files.forEach((x) => zip.file(x.name, x.blob));
+        download(await zip.generateAsync({ type: 'blob' }), `Relatorios_AMP_${safeFileName(periodo)}.zip`);
       }
       onClose();
     }, 'Exportação concluída.');
@@ -159,10 +181,7 @@ export default function ExportDialog({ onClose, initial }: { onClose: () => void
           <div className="rounded-lg border border-slate-200 p-3">
             <label className="flex items-start gap-2 font-medium">
               <input type="checkbox" className="mt-1" checked={formatoSE} onChange={(e) => setFormatoSE(e.target.checked)} />
-              <span>
-                Relatório oficial SE-PL-0510-CD001-R0
-                <span className="block text-xs font-normal text-slate-500">Layout IDG com logo em N1:O3 e total =SUM(K5:Kn).</span>
-              </span>
+              <span>Relatório oficial SE-PL-0510-CD001-R0</span>
             </label>
             {formatoSE && (
               <div className="mt-2 space-y-1 pl-6 text-xs">
@@ -179,17 +198,15 @@ export default function ExportDialog({ onClose, initial }: { onClose: () => void
             <label className="flex items-start gap-2 font-medium">
               <input type="checkbox" className="mt-1" checked={formatoAloc} onChange={(e) => setFormatoAloc(e.target.checked)} />
               <span>
-                Justificativa de alocação mensal
-                <span className="block text-xs font-normal text-slate-500">
-                  Resumo colaborador × mês (capacidade, horas no mês, ocupação, férias) e uma aba por mês com cada atividade, horas do mês, prazo e todas as justificativas de alteração de data.
-                </span>
+                Justificativa de alocação mensal (opcional)
+                <span className="block text-xs font-normal text-slate-500">Arquivo separado com horas por mês, ocupação e justificativas de data.</span>
               </span>
             </label>
           </div>
         </div>
         {user.role !== 'colaborador' && (
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={porColab} onChange={(e) => setPorColab(e.target.checked)} /> Gerar um arquivo separado por colaborador ({selCollabs.length} arquivo{selCollabs.length === 1 ? '' : 's'} por formato)
+            <input type="checkbox" checked={porColab} onChange={(e) => setPorColab(e.target.checked)} /> Gerar um arquivo separado por colaborador ({selCollabs.length} arquivo{selCollabs.length === 1 ? '' : 's'}, entregues num .zip)
           </label>
         )}
         {!list.length && <Alert kind="warning">Nenhuma atividade com esses filtros no período.</Alert>}

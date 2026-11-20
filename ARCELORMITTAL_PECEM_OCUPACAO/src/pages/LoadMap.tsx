@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileSpreadsheet, FileText } from 'lucide-react';
 import { useDb, useSession, collaboratorName } from '../lib/store';
 import { addDays, diffDays, findHoliday, fmtBR, isWeekend, MONTHS_ABBR, todayISO, weekStart } from '../lib/dates';
 import { dailyLoad, executionWindow, isClosed, isLate } from '../services/activities';
 import { visibleActivities, visibleCollaborators, visibleVacations } from '../services/views';
 import { ACTIVITY_STATUSES, type Activity } from '../types';
-import { Badge, Button, Card, Empty, Field, cx } from '../components/ui';
+import { Badge, Button, Card, Empty, Field, cx, useAction } from '../components/ui';
+import { exportLoadMapExcel, exportLoadMapPdf, type LoadModel } from '../excel/exportLoadMap';
 
 const DAY_W = 26;
 const BAR: Record<string, string> = {
@@ -57,6 +58,44 @@ export default function LoadMap() {
       return w.start <= d && w.end >= d && a.status !== 'Cancelado';
     });
     return { h: on.reduce((s, a) => s + dailyLoad(a), 0), n: on.length };
+  };
+
+  const { busy, run } = useAction();
+  const buildModel = (): LoadModel => {
+    const wk = weekStart(today);
+    const filtroTexto =
+      [
+        f.collab && `Colaborador: ${collaboratorName(f.collab)}`,
+        f.solicitante && `Solicitante: ${f.solicitante}`,
+        f.area && `Área: ${f.area}`,
+        f.cc && `Centro de custo: ${f.cc}`,
+        f.status && `Status: ${f.status}`,
+        f.ocultarFinalizadas && 'sem finalizadas',
+      ]
+        .filter(Boolean)
+        .join(' · ') || 'Sem filtros';
+    return {
+      start,
+      end,
+      days,
+      groupBy,
+      today,
+      limiteDia: settings.limiteDia,
+      limiteSemana: settings.limiteSemana,
+      filtroTexto,
+      groups: groups.map((g) => {
+        const myVac = g.collabId ? vacs.filter((v) => v.collaboratorId === g.collabId).flatMap((v) => v.periodos) : [];
+        return {
+          title: g.title,
+          weekH: groupBy === 'colaborador' ? Array.from({ length: 7 }, (_, i) => loadOf(g.list, addDays(wk, i)).h).reduce((s, h) => s + h, 0) : undefined,
+          daily: days.map((d) => ({ d, ...loadOf(g.list, d), off: isWeekend(d) || !!findHoliday(d, settings.feriadosExtras), vac: myVac.some((p) => p.inicio <= d && p.fim >= d) })),
+          rows: g.list.map((a) => {
+            const w = executionWindow(a, today)!;
+            return { a, colaborador: collaboratorName(a.collaboratorId), start: w.start, end: w.end, previsto: w.previsto, late: !!(isLate(a, today) && !isClosed(a) && a.estTermino), hDia: dailyLoad(a) };
+          }),
+        };
+      }),
+    };
   };
 
   return (
@@ -139,6 +178,16 @@ export default function LoadMap() {
           <input type="checkbox" checked={f.ocultarFinalizadas} onChange={(e) => setF((x) => ({ ...x, ocultarFinalizadas: e.target.checked }))} /> Ocultar finalizadas
         </label>
       </Card>
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <span className="mr-auto text-xs text-slate-500">Exporta o que está na tela (período, filtros e agrupamento): Gantt + tabela.</span>
+        <Button variant="secondary" size="sm" icon={<FileText className="h-4 w-4" />} loading={busy} disabled={!groups.length} onClick={() => run(() => exportLoadMapPdf(buildModel()), 'PDF gerado.')}>
+          Exportar PDF
+        </Button>
+        <Button variant="secondary" size="sm" icon={<FileSpreadsheet className="h-4 w-4" />} loading={busy} disabled={!groups.length} onClick={() => run(() => exportLoadMapExcel(buildModel()), 'Excel gerado.')}>
+          Exportar Excel
+        </Button>
+      </div>
 
       <div className="flex flex-wrap gap-3 text-xs text-slate-600">
         {Object.entries(BAR).map(([k, c]) => (
