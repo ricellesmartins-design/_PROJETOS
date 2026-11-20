@@ -60,8 +60,15 @@ São públicas por natureza; a proteção dos dados é feita pelo RLS.
 
 Fluxo: **Supabase** é o banco › **Netlify** hospeda o site › **GitHub** guarda uma cópia do código.
 O `ATUALIZAR.bat` roda testes e build e publica a pasta `dist` com `netlify-cli deploy --prod`
-(mesmo método do `publicar_mgr_projetos.cmd`). Na primeira vez ele cria o site `arcelormittal-pecem-ocupacao`
-e grava o vínculo em `.netlify/state.json` desta pasta. Cabeçalhos de cache ficam em `public/_headers`.
+(mesmo método do `publicar_mgr_projetos.cmd`) no site **https://idg-amp-gestao.netlify.app**
+(variável `NETLIFY_SITE` no script). Cabeçalhos de cache ficam em `public/_headers`.
+
+## Backup e zerar o sistema (coordenador)
+
+Configurações › Backup: baixar backup completo em JSON ou Excel; envio diário às 06:00 por e-mail
+(JSON + Excel) para o e-mail configurado e sempre para ricellesmartins@gmail.com (requer `RESEND_API_KEY`).
+Configurações › Zerar o sistema: baixa o backup completo e chama `reset_system` (migração 008),
+apagando a movimentação ou tudo (exceto usuários e configurações). Confirmação digitando ZERAR.
 
 ## Pasta no Windows e atualizações
 
