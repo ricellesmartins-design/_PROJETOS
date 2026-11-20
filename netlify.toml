@@ -1,0 +1,9 @@
+# Netlify (site idg-amp-gestao): o app fica na subpasta ARCELORMITTAL_PECEM_OCUPACAO.
+# Sem este arquivo o Netlify publica a raiz do repositório e o endereço principal não abre o app.
+[build]
+  base = "ARCELORMITTAL_PECEM_OCUPACAO"
+  command = "npm test && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
