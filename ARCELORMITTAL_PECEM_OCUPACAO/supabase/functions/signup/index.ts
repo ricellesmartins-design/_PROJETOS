@@ -1,8 +1,9 @@
 // Contas de acesso: cadastro restrito por domínio corporativo, convites do coordenador,
 // "Esqueci minha senha" e redefinição de senha pelo coordenador.
 // Convites e recuperação usam um link próprio (?acesso=<id>.<token>): o token fica só como hash
-// SHA-256 em app_metadata (que o usuário não consegue alterar) e o e-mail sai pelo Resend.
+// SHA-256 em app_metadata (que o usuário não consegue alterar) e o e-mail sai pelo Gmail (ou Resend).
 import { createClient, type SupabaseClient, type User } from 'npm:@supabase/supabase-js@2';
+import nodemailer from 'npm:nodemailer@6.9.16';
 
 const ALLOWED = ['arcelormittal.com', 'idg-eng.com', 'idg.global', 'idg.global.com'];
 const COORDINATORS = ['ricelles@idg.global.com', 'ricelles@idg-eng.com', 'ricelles@idg.global'];
@@ -60,9 +61,22 @@ async function listAllUsers(admin: Admin) {
   return all;
 }
 
+// Envio de e-mail: pelo Gmail (SMTP, senha de app em app_secrets.gmail_app_password) quando
+// configurado; senão pelo Resend. O Gmail entrega para qualquer destinatário sem verificar domínio.
 async function sendEmail(admin: Admin, to: string, subject: string, html: string) {
-  const { data: secrets } = await admin.from('app_secrets').select('name, value').in('name', ['resend_api_key', 'email_from']);
+  const { data: secrets } = await admin.from('app_secrets').select('name, value').in('name', ['resend_api_key', 'email_from', 'gmail_user', 'gmail_app_password']);
   const s = Object.fromEntries((secrets ?? []).map((r) => [r.name, r.value]));
+  const gmailPass = String(s.gmail_app_password ?? '').replace(/\s+/g, '');
+  if (gmailPass) {
+    try {
+      const user = s.gmail_user || 'ricellesmartins@gmail.com';
+      const t = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user, pass: gmailPass } });
+      await t.sendMail({ from: `Gestão AMP · IDG <${user}>`, to, subject, html });
+      return { ok: true, via: 'gmail' };
+    } catch (e) {
+      return { ok: false, erro: 'Gmail: ' + (e instanceof Error ? e.message : String(e)) };
+    }
+  }
   const key = Deno.env.get('RESEND_API_KEY') || s.resend_api_key;
   if (!key) return { ok: false, erro: 'Envio de e-mail não configurado.' };
   const res = await fetch('https://api.resend.com/emails', {
@@ -71,7 +85,7 @@ async function sendEmail(admin: Admin, to: string, subject: string, html: string
     body: JSON.stringify({ from: Deno.env.get('EMAIL_FROM') || s.email_from || 'Gestão AMP <onboarding@resend.dev>', to: [to], subject, html }),
   });
   const out = await res.json().catch(() => ({}));
-  return res.ok ? { ok: true } : { ok: false, erro: String(out?.message ?? JSON.stringify(out)) };
+  return res.ok ? { ok: true, via: 'resend' } : { ok: false, erro: String(out?.message ?? JSON.stringify(out)) };
 }
 
 const emailHtml = (titulo: string, texto: string, link: string, botao: string, rodape: string) => `

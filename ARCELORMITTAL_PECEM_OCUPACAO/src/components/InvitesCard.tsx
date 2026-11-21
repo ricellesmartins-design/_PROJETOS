@@ -223,7 +223,7 @@ export function InviteResult({ sent, onClose }: { sent: Sent; onClose: () => voi
           <Alert kind={sent.enviado ? 'success' : 'warning'} title={sent.enviado ? `Convite enviado para ${sent.email}` : `Convite criado para ${sent.email}, mas o e-mail não saiu`}>
             {!sent.enviado && (
               <p className="mb-2">
-                O envio automático só chega a outros endereços depois que um domínio for verificado no Resend. Por enquanto, mande o link abaixo pela sua conta de e-mail ou pelo WhatsApp.
+                O envio automático falhou (confira a senha de app do Gmail cadastrada no Supabase). Por enquanto, mande o link abaixo pela sua conta de e-mail ou pelo WhatsApp.
               </p>
             )}
             <div className="mb-2 break-all rounded bg-white/70 px-2 py-1 font-mono text-[11px]">{sent.link}</div>

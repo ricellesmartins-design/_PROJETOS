@@ -1,9 +1,11 @@
 // Backup completo por e-mail (JSON + Excel com uma aba por tabela).
 // Vai para o e-mail das configurações e sempre também para ricellesmartins@gmail.com.
 // Disparado diariamente pelo pg_cron (x-cron-secret) ou manualmente pelo coordenador (JWT).
-// Envio via Resend: chave no segredo RESEND_API_KEY ou na tabela app_secrets (resend_api_key).
+// Envio pelo Gmail (SMTP com senha de app em app_secrets.gmail_app_password) ou, sem ela, pelo Resend
+// (segredo RESEND_API_KEY ou app_secrets.resend_api_key).
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as XLSX from 'npm:xlsx@0.18.5';
+import nodemailer from 'npm:nodemailer@6.9.16';
 
 const FIXED_TO = 'ricellesmartins@gmail.com';
 const SHEETS: [string, string][] = [
@@ -64,36 +66,52 @@ Deno.serve(async (req) => {
   }
   const settings = (dump.app_settings as { data: Record<string, unknown> }[])[0]?.data ?? {};
   const to = [...new Set([String(settings.backupEmail || FIXED_TO).trim().toLowerCase(), FIXED_TO])];
-  const key = Deno.env.get('RESEND_API_KEY') || s.resend_api_key;
   const stamp = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 16).replace('T', '_').replace(':', 'h');
-  if (!key) {
-    await admin.from('job_runs').insert({ job: 'backup', detail: { ok: false, erro: 'RESEND_API_KEY não configurada', origem } });
-    return json({ error: 'Envio de e-mail não configurado: cadastre o segredo RESEND_API_KEY nas Edge Functions do Supabase.' }, 500);
-  }
   // deno-lint-ignore no-explicit-any
   const acts = dump.activities as any[];
   // deno-lint-ignore no-explicit-any
   const vacs = dump.vacations as any[];
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: Deno.env.get('BACKUP_FROM') ?? 'Backup AMP <onboarding@resend.dev>',
-      to,
-      subject: `Backup · Gestão de Atividades e Férias AMP · ${stamp}`,
-      html: `<p>Backup automático (${origem}) do sistema de Gestão de Atividades e Férias — Contrato AMP.</p>
+  const subject = `Backup · Gestão de Atividades e Férias AMP · ${stamp}`;
+  const html = `<p>Backup automático (${origem}) do sistema de Gestão de Atividades e Férias — Contrato AMP.</p>
         <ul><li>Atividades: ${acts.length}</li><li>Solicitações de férias: ${vacs.length}</li>
         <li>Justificativas de datas: ${(dump.date_change_logs as unknown[]).length}</li>
         <li>Colaboradores: ${(dump.collaborators as unknown[]).length}</li></ul>
-        <p>Em anexo: backup completo em JSON e em Excel (uma aba por tabela).</p>`,
-      attachments: [
-        { filename: `backup_amp_${stamp}.json`, content: b64(JSON.stringify(dump, null, 1)) },
-        { filename: `backup_amp_${stamp}.xlsx`, content: xlsxB64(dump) },
-      ],
-    }),
-  });
-  const out = await res.json().catch(() => ({}));
-  await admin.from('job_runs').insert({ job: 'backup', detail: { ok: res.ok, para: to, origem, resposta: out } });
-  if (!res.ok) return json({ error: 'Falha no envio: ' + JSON.stringify(out) }, 502);
-  return json({ ok: true, para: to });
+        <p>Em anexo: backup completo em JSON e em Excel (uma aba por tabela).</p>`;
+  const files = [
+    { filename: `backup_amp_${stamp}.json`, content: b64(JSON.stringify(dump, null, 1)) },
+    { filename: `backup_amp_${stamp}.xlsx`, content: xlsxB64(dump) },
+  ];
+  const gmailPass = String(s.gmail_app_password ?? '').replace(/\s+/g, '');
+  let ok = false;
+  let resposta: unknown;
+  let via = '';
+  if (gmailPass) {
+    via = 'gmail';
+    try {
+      const user = s.gmail_user || FIXED_TO;
+      const t = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user, pass: gmailPass } });
+      const info = await t.sendMail({ from: `Backup AMP · IDG <${user}>`, to: to.join(', '), subject, html, attachments: files.map((f) => ({ filename: f.filename, content: f.content, encoding: 'base64' })) });
+      ok = true;
+      resposta = { messageId: info.messageId };
+    } catch (e) {
+      resposta = { erro: e instanceof Error ? e.message : String(e) };
+    }
+  } else {
+    via = 'resend';
+    const key = Deno.env.get('RESEND_API_KEY') || s.resend_api_key;
+    if (!key) {
+      await admin.from('job_runs').insert({ job: 'backup', detail: { ok: false, erro: 'Envio de e-mail não configurado', origem } });
+      return json({ error: 'Envio de e-mail não configurado: cadastre a senha de app do Gmail (gmail_app_password) em app_secrets.' }, 500);
+    }
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: Deno.env.get('BACKUP_FROM') ?? 'Backup AMP <onboarding@resend.dev>', to, subject, html, attachments: files }),
+    });
+    ok = res.ok;
+    resposta = await res.json().catch(() => ({}));
+  }
+  await admin.from('job_runs').insert({ job: 'backup', detail: { ok, via, para: to, origem, resposta } });
+  if (!ok) return json({ error: 'Falha no envio: ' + JSON.stringify(resposta) }, 502);
+  return json({ ok: true, para: to, via });
 });
