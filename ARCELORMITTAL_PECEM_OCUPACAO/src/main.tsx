@@ -5,6 +5,12 @@ import { registerSW } from './lib/push';
 import './lib/install';
 import './lib/theme';
 import './index.css';
+import { reloadForNewVersion } from './lib/reload';
+
+// Chunk de versão antiga (aba aberta antes da publicação): recarrega para pegar a nova.
+window.addEventListener('vite:preloadError', (e) => {
+  if (reloadForNewVersion()) e.preventDefault();
+});
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

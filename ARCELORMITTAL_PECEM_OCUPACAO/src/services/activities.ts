@@ -114,9 +114,10 @@ export function validateActivity(a: Activity, all: Activity[]): string[] {
   if (a.estInicio && a.estTermino && a.estTermino < a.estInicio) errs.push('Estimativa de término anterior à estimativa de início.');
   if (a.inicioReal && a.terminoReal && a.terminoReal < a.inicioReal) errs.push('Término real anterior ao início real.');
   if (a.status === 'Finalizado' && !a.terminoReal) errs.push('Atividade finalizada precisa de Término Real.');
-  // O ID de afastamento pode se repetir (um lançamento por período de atestado).
-  const dup = !isAbsence(a) && all.find((x) => x.id !== a.id && x.codigo.trim().toUpperCase() === a.codigo.trim().toUpperCase() && x.collaboratorId === a.collaboratorId);
-  if (dup) errs.push(`Já existe a atividade ${a.codigo} para este colaborador.`);
+  // O mesmo ID pode ter vários trechos (ex.: interrompido por atestado); só bloqueia o mesmo ID com o mesmo início.
+  const ini = (x: Activity) => x.inicioReal ?? x.estInicio ?? '';
+  const dup = all.find((x) => x.id !== a.id && x.codigo.trim().toUpperCase() === a.codigo.trim().toUpperCase() && x.collaboratorId === a.collaboratorId && ini(x) === ini(a));
+  if (dup) errs.push(`Já existe a atividade ${a.codigo} para este colaborador com o mesmo início.`);
   return errs;
 }
 
