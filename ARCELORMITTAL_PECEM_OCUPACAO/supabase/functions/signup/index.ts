@@ -307,7 +307,18 @@ Deno.serve(async (req) => {
     if (error || !created.user) {
       if (/already|registered|exists/i.test(error?.message ?? '')) {
         const u = await findUserByEmail(admin, email);
-        if (u?.app_metadata?.convite && !(await hasProfile(admin, u.id))) return json({ error: 'Você tem um convite pendente. Use o link do e-mail de convite ou "Esqueci minha senha".' }, 400);
+        const convite = u?.app_metadata?.convite as Convite | undefined;
+        if (u && convite && !(await hasProfile(admin, u.id))) {
+          // Convidado que preferiu "Criar conta" pelo site: assume o convite (vínculo com o colaborador).
+          // O perfil vem do domínio; coordenador só por convite aceito pelo link.
+          const meta = { ...u.app_metadata, convite: { ...convite, aceitoEm: new Date().toISOString() } };
+          delete meta.acesso;
+          const { error: upErr } = await admin.auth.admin.updateUserById(u.id, { password, app_metadata: meta, user_metadata: { nome } });
+          if (upErr) return json({ error: upErr.message }, 400);
+          const role = domain === 'arcelormittal.com' ? 'cliente' : 'colaborador';
+          const r = await createProfile(admin, { id: u.id, email, nome, role, matricula: String(body.matricula ?? '').trim(), funcao: String(body.funcao ?? '').trim(), collaboratorId: convite.collaboratorId, confiavel: true });
+          return json({ ok: true, ...r });
+        }
         return json({ error: 'E-mail já cadastrado. Use "Esqueci minha senha" se não lembrar a senha.' }, 400);
       }
       return json({ error: error?.message ?? 'Falha ao criar usuário.' }, 400);
