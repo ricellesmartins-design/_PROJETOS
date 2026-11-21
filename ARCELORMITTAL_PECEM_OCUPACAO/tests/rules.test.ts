@@ -166,13 +166,33 @@ describe('importação: mesmo ID em vários colaboradores e atestados', () => {
     const { sheets } = parseGrids([
       sheet('ANA NOV-2026', 'ANA', [act('', 'Atestado médico', '2026-11-10', '2026-11-11'), act('ATESTADO', 'Consulta', '2026-11-20', '2026-11-20'), act('0510-0102', 'Projeto', '2026-11-03', '2026-11-05', 'Em andamento', 'afastado 2 dias'), act('0510-0103', 'AFASTADO - atestado', '2026-11-24', '2026-11-25')]),
     ]);
-    // A linha com ID vazio é ignorada (sem ID); as demais ficam.
+    // A linha de atestado sem ID (como no relatório oficial) também entra.
     const rows = compare(sheets);
     const abs = rows.filter((r) => r.parsed.codigo === ABSENCE_CODE);
-    expect(abs.length).toBe(2);
+    expect(abs.length).toBe(3);
     expect(abs[0].parsed.descricao).toBe(ABSENCE_DESC);
-    expect(abs[1].parsed.inicioReal).toBe('2026-11-24');
+    expect(abs[0].parsed.observacao).toBe('ATESTADO MÉDICO');
+    expect(abs[0].parsed.horasRealizadas).toBe(8);
+    expect(abs[2].parsed.inicioReal).toBe('2026-11-24');
     expect(rows.find((r) => r.parsed.codigo === '0510-0102')?.parsed.descricao).toBe('Projeto');
+  });
+
+  it('mesmo ID em vários trechos do mesmo colaborador (interrompido por atestado) vira uma linha por trecho', () => {
+    const { sheets } = parseGrids([
+      sheet('ANA OUT-2026', 'ANA', [
+        act('T2IDEA0010052', 'Projeto LGA', '2026-10-01', '2026-10-05'),
+        act('', 'ATESTADO MÉDICO', '2026-10-06', '2026-10-07', '', ''),
+        act('T2IDEA0010052', 'Projeto LGA', '2026-10-08', '2026-10-08'),
+        act('', 'Falta', '2026-10-09', '2026-10-09', '', ''),
+        act('T2IDEA0010052', 'Projeto LGA', '2026-10-13', '2026-10-21'),
+        act('T2IDEA0010053', 'Falta de material na obra', '2026-10-22', '2026-10-23'),
+      ]),
+      sheet('ANA NOV-2026', 'ANA', [act('T2IDEA0010052', 'Projeto LGA', '2026-10-13', '2026-10-21')]),
+    ]);
+    const rows = compare(sheets);
+    expect(rows.filter((r) => r.parsed.codigo === 'T2IDEA0010052').map((r) => r.parsed.inicioReal)).toEqual(['2026-10-01', '2026-10-08', '2026-10-13']);
+    expect(rows.filter((r) => r.parsed.codigo === ABSENCE_CODE).length).toBe(2);
+    expect(rows.find((r) => r.parsed.codigo === 'T2IDEA0010053')?.parsed.descricao).toBe('Falta de material na obra');
   });
 
   it('nome do colaborador sai do nome da aba quando o cabeçalho está vazio', () => {
@@ -183,6 +203,7 @@ describe('importação: mesmo ID em vários colaboradores e atestados', () => {
   it('afastamento não conta carga e pode repetir o ID', () => {
     const a = { id: 'x', codigo: ABSENCE_CODE, collaboratorId: 'a', descricao: ABSENCE_DESC, status: 'Finalizado', estInicio: '2026-11-10', estTermino: '2026-11-11', inicioReal: '2026-11-10', terminoReal: '2026-11-11' } as unknown as Activity;
     expect(dailyLoad(a)).toBe(0);
-    expect(validateActivity({ ...a, id: 'y' }, [a])).toEqual([]);
+    expect(validateActivity({ ...a, id: 'y', inicioReal: '2026-11-20', estInicio: '2026-11-20', terminoReal: '2026-11-20', estTermino: '2026-11-20' }, [a])).toEqual([]);
+    expect(validateActivity({ ...a, id: 'z' }, [a]).length).toBe(1);
   });
 });

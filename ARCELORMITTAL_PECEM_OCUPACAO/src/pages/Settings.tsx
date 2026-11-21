@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import { Bell, Database, Image as ImageIcon, KeyRound, Mail, Plus, RotateCcw, Save, Trash2, UserCheck, UserX, Users } from 'lucide-react';
+import { Bell, Database, Image as ImageIcon, KeyRound, Mail, Plus, RotateCcw, Save, Send, Trash2, UserCheck, UserX, Users } from 'lucide-react';
 import { useDb, useSession } from '../lib/store';
 import { invokeFunction } from '../lib/supabase';
-import { adminResetPassword, ROLE_LABEL } from '../lib/auth';
+import { adminResetPassword, isAllowedDomain, isEmailFormat, normalizeEmail, ROLE_LABEL, sendInvite } from '../lib/auth';
 import { type Profile } from '../lib/db';
 import { uid } from '../lib/id';
 import { fmtBR, fmtDateTimeBR, holidaysOf, todayISO } from '../lib/dates';
 import { downloadBackupExcel, downloadBackupJson, resetSystem, type ResetScope } from '../lib/backup';
 import type { Collaborator, CostCenter, Holiday, Role, Settings as SettingsT } from '../types';
-import InvitesCard from '../components/InvitesCard';
+import InvitesCard, { InviteResult, type Sent } from '../components/InvitesCard';
 import defaultLogo from '../templates/logo-idg-default.png';
 import defaultSeals from '../templates/selos-iso-default.png';
 import { Alert, Badge, Button, Card, Field, Modal, useAction } from '../components/ui';
@@ -298,12 +298,30 @@ function CollaboratorsCard() {
   const [excluir, setExcluir] = useState<Collaborator>();
   const [confirmText, setConfirmText] = useState('');
   const [verDesligados, setVerDesligados] = useState(false);
+  const [convite, setConvite] = useState<Sent>();
   const all = [...db.all('collaborators')].sort((a, b) => Number(b.ativo) - Number(a.ativo) || (a.nome ?? '').localeCompare(b.nome ?? ''));
   const list = all.filter((c) => verDesligados || c.ativo);
   const desligados = all.filter((c) => !c.ativo).length;
   const logins = (id: string) => db.all('profiles').filter((p) => p.collaboratorId === id);
   const nAtiv = (id: string) => db.all('activities').filter((a) => a.collaboratorId === id).length;
   const nFer = (id: string) => db.all('vacations').filter((v) => v.collaboratorId === id).length;
+
+  const saveCollab = async (e: Collaborator & { novo?: boolean }) => {
+    const { novo, ...c } = e;
+    const row: Collaborator = { ...c, nome: c.nome.trim().toUpperCase(), funcao: c.funcao.trim().toUpperCase(), matricula: c.matricula.trim(), email: c.email?.trim().toLowerCase() || undefined };
+    if (novo) await db.insert('collaborators', row);
+    else await db.update('collaborators', row);
+    return row;
+  };
+  const temAcesso = (email?: string) => !!email && db.all('profiles').some((p) => p.email.toLowerCase() === normalizeEmail(email));
+  // Salva o cadastro (o convite precisa do e-mail gravado) e envia o convite já vinculado a este colaborador.
+  const convidar = (e: Collaborator & { novo?: boolean }) =>
+    run(async () => {
+      const row = await saveCollab(e);
+      setEdit({ ...row });
+      const r = await sendInvite({ email: row.email!, nome: row.nome, role: 'colaborador', collaboratorId: row.id });
+      setConvite({ email: row.email!, nome: row.nome, ...r });
+    }, 'Convite criado.');
 
   // Desligar = inativar o cadastro e bloquear o login vinculado; o histórico continua nos relatórios e backups.
   const setAtivo = (c: Collaborator, ativo: boolean) =>
@@ -443,7 +461,10 @@ function CollaboratorsCard() {
         <Modal
           open
           size="md"
-          onClose={() => setEdit(undefined)}
+          onClose={() => {
+            setEdit(undefined);
+            setConvite(undefined);
+          }}
           title={edit.novo ? 'Novo colaborador' : 'Editar colaborador'}
           footer={
             <Button
@@ -451,10 +472,7 @@ function CollaboratorsCard() {
               disabled={!edit.nome.trim()}
               onClick={() =>
                 run(async () => {
-                  const { novo, ...c } = edit;
-                  const row: Collaborator = { ...c, nome: c.nome.trim().toUpperCase(), funcao: c.funcao.trim().toUpperCase(), matricula: c.matricula.trim(), email: c.email?.trim().toLowerCase() || undefined };
-                  if (novo) await db.insert('collaborators', row);
-                  else await db.update('collaborators', row);
+                  await saveCollab(edit);
                   setEdit(undefined);
                 }, 'Colaborador salvo.')
               }
@@ -476,8 +494,18 @@ function CollaboratorsCard() {
               </Field>
             </div>
             <Field label="E-mail corporativo" hint="Quando o colaborador se cadastrar com este e-mail, o login é vinculado automaticamente a este cadastro.">
-              <input type="email" className="input" value={edit.email ?? ''} onChange={(e) => setEdit({ ...edit, email: e.target.value })} />
+              <div className="flex gap-2">
+                <input type="email" className="input" value={edit.email ?? ''} onChange={(e) => setEdit({ ...edit, email: e.target.value })} />
+                {edit.email && isEmailFormat(edit.email) && isAllowedDomain(edit.email) && !temAcesso(edit.email) && (
+                  <Button type="button" variant="secondary" className="shrink-0" loading={busy} disabled={!edit.nome.trim()} icon={<Send className="h-4 w-4" />} onClick={() => convidar(edit)}>
+                    Enviar convite
+                  </Button>
+                )}
+              </div>
             </Field>
+            {edit.email && temAcesso(edit.email) && <p className="-mt-2 text-xs text-emerald-700">Esta pessoa já tem acesso ao sistema.</p>}
+            {edit.email && isEmailFormat(edit.email) && !isAllowedDomain(edit.email) && <p className="-mt-2 text-xs text-red-600">Domínio não autorizado para acesso.</p>}
+            {convite && <InviteResult sent={convite} onClose={() => setConvite(undefined)} />}
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={edit.ativo} onChange={(e) => setEdit({ ...edit, ativo: e.target.checked })} /> Ativo (desmarcado = desligado)
             </label>
@@ -545,7 +573,9 @@ function CostCentersCard() {
         <Modal
           open
           size="md"
-          onClose={() => setEdit(undefined)}
+          onClose={() => {
+            setEdit(undefined);
+          }}
           title={edit.novo ? 'Novo centro de custo' : `Centro de custo ${edit.codigo}`}
           footer={
             <Button

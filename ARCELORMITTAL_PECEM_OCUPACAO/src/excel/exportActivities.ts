@@ -10,9 +10,28 @@ import drawingTpl from '../templates/atividades_drawing.xml?raw';
 import cfTpl from '../templates/atividades_cf.xml?raw';
 import { db } from '../lib/db';
 import { excelSerial, monthEnd, monthStart, MONTHS_ABBR, MONTHS_PT, networkDays } from '../lib/dates';
-import { computeEstHours, computeRealHours } from '../services/activities';
+import { ABSENCE_DESC, computeEstHours, computeRealHours, isAbsence } from '../services/activities';
 import type { Activity, Collaborator } from '../types';
 import { download, esc, fitBox, logoSource, safeFileName, toPng, XLSX_MIME } from './common';
+
+// Linhas de ausência (atestado, afastamento, doença, falta) saem grifadas em roxo-claro: os estilos
+// usados na linha são clonados no styles.xml do modelo com um preenchimento novo.
+const ABS_FILL = 'FFE9D5FF';
+const ROW_STYLES = [30, 11, 3, 1, 4, 29, 8, 40];
+const { styles: STYLES_XML, hl: HL } = (() => {
+  let xml = stylesXml;
+  const fillsCount = Number(xml.match(/<fills count="(\d+)"/)![1]);
+  xml = xml.replace(/<fills count="\d+">/, `<fills count="${fillsCount + 1}">`).replace('</fills>', `<fill><patternFill patternType="solid"><fgColor rgb="${ABS_FILL}"/><bgColor indexed="64"/></patternFill></fill></fills>`);
+  const body = xml.match(/<cellXfs count="\d+">([\s\S]*?)<\/cellXfs>/)![1];
+  const xfs = body.match(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)!;
+  const hl: Record<number, number> = {};
+  const extra = ROW_STYLES.map((id, i) => {
+    hl[id] = xfs.length + i;
+    return xfs[id].replace(/fillId="\d+"/, `fillId="${fillsCount}"`).replace(/^<xf\b(?![^>]*applyFill)/, '<xf applyFill="1"');
+  });
+  xml = xml.replace(/<cellXfs count="\d+">[\s\S]*?<\/cellXfs>/, `<cellXfs count="${xfs.length + extra.length}">${body}${extra.join('')}</cellXfs>`);
+  return { styles: xml, hl };
+})();
 
 export interface ActivitySheet {
   collaborator: Collaborator;
@@ -102,7 +121,9 @@ function buildSheet(sh: ActivitySheet, sst: SST): string {
 
   let r = 5;
   const list = [...sh.activities].sort((a, b) => (a.inicioReal ?? a.estInicio ?? a.dataSolicitacao ?? '').localeCompare(b.inicioReal ?? b.estInicio ?? b.dataSolicitacao ?? ''));
+  const absRows = new Set<number>();
   for (const a of list) {
+    if (isAbsence(a)) absRows.add(r);
     const est = computeEstHours(a);
     const real = computeRealHours(a);
     const estCell: Cell =
@@ -116,25 +137,31 @@ function buildSheet(sh: ActivitySheet, sst: SST): string {
     const docs = a.documentosAMP.trim();
     const lines = Math.max(docs ? docs.split('\n').length : 1, Math.ceil(a.descricao.length / 85), Math.ceil(a.observacao.length / 65));
     const ht = Math.max(36, lines * 20);
+    const abs = isAbsence(a);
+    const st = (id: number) => (abs ? HL[id] : id);
+    // Ausência: descrição como no modelo ("ATESTADO MÉDICO", "FALTA"...), sem status e centro de custo "-".
+    const [origem, ...resto] = a.observacao.split(' · ');
+    const descricao = abs ? (a.observacao ? origem : ABSENCE_DESC).toUpperCase() : a.descricao;
+    const observacao = abs ? resto.join(' · ') : a.observacao;
     rows.push(
       rowXml(
         r,
         [
-          { s: 30, v: a.codigo },
-          { s: 11, v: a.descricao },
-          { s: 3, v: a.solicitante },
-          { s: 1, v: a.area },
-          { s: 4, v: d(a.dataSolicitacao) },
-          { s: 4, v: d(a.estInicio) },
-          { s: 4, v: d(a.estTermino) },
-          estCell,
-          { s: 4, v: d(a.inicioReal) },
-          { s: 4, v: d(a.terminoReal) },
-          realCell,
-          { s: 29, v: docs },
-          { s: 4, v: a.centroCusto },
-          { s: 1, v: a.status },
-          { s: 8, v: a.observacao },
+          { s: st(30), v: a.codigo },
+          { s: st(11), v: descricao },
+          { s: st(3), v: a.solicitante },
+          { s: st(1), v: a.area },
+          { s: st(4), v: d(a.dataSolicitacao) },
+          { s: st(4), v: d(a.estInicio) },
+          { s: st(4), v: d(a.estTermino) },
+          { ...estCell, s: st(estCell.s) },
+          { s: st(4), v: d(a.inicioReal) },
+          { s: st(4), v: d(a.terminoReal) },
+          { ...realCell, s: st(realCell.s) },
+          { s: st(29), v: docs },
+          { s: st(4), v: abs ? a.centroCusto || '-' : a.centroCusto },
+          { s: st(1), v: abs ? '' : a.status },
+          { s: st(8), v: observacao },
         ],
         sst,
         ` ht="${ht}" customHeight="1"`,
@@ -159,7 +186,9 @@ function buildSheet(sh: ActivitySheet, sst: SST): string {
       rowXml(rr, [{ s: 8 }, { s: i <= 2 ? 11 : 8 }, { s: 8 }, { s: 8 }, { s: 8 }, { s: 8 }, { s: 1 }, { s: 1 }, { s: 1 }, { s: i === 2 ? 26 : 1 }, { s: 1 }, { s: 8 }, { s: 8 }, { s: 1 }, { s: 8 }], sst, ' ht="39.6" customHeight="1"'),
     );
   }
-  const cfRange = `M5:M${Math.max(last, 5)}`;
+  // A validação do centro de custo (vermelho/verde) não se aplica às linhas de ausência.
+  const cfRows = Array.from({ length: Math.max(last, 5) - 4 }, (_, i) => i + 5).filter((n) => !absRows.has(n));
+  const cfRange = cfRows.length ? cfRows.reduce<string[]>((acc, n, i) => (i && cfRows[i - 1] === n - 1 ? (acc[acc.length - 1] = acc[acc.length - 1].replace(/:M\d+$/, '') + `:M${n}`, acc) : [...acc, `M${n}:M${n}`]), []).join(' ') : 'M5:M5';
   const cf = cfTpl.replace(/M5:M7 M9:M91/g, cfRange);
   const cfMain = cf.slice(0, cf.indexOf('<extLst>'));
   const cfExt = cf.slice(cf.indexOf('<extLst>'));
@@ -214,7 +243,7 @@ export async function buildActivitiesWorkbook(sheets: ActivitySheet[]): Promise<
   const ccIndex = sheets.length + 1;
   zip.file(`xl/worksheets/sheet${ccIndex}.xml`, costCenterSheet(sst));
   zip.file('xl/media/image1.png', logo.bytes);
-  zip.file('xl/styles.xml', stylesXml);
+  zip.file('xl/styles.xml', STYLES_XML);
   zip.file('xl/theme/theme1.xml', themeXml);
   zip.file('xl/sharedStrings.xml', sst.xml());
 

@@ -7,13 +7,12 @@ import { useDb } from '../lib/store';
 import type { Role } from '../types';
 import { Alert, Badge, Button, Card, Field, useAction, useToast } from './ui';
 
-type Sent = { email: string; nome: string; link: string; enviado: boolean; erroEnvio?: string };
+export type Sent = { email: string; nome: string; link: string; enviado: boolean; erroEnvio?: string };
 
 const STATUS_COLOR: Record<Invite['status'], string> = { Pendente: 'amber', Aceito: 'green', Expirado: 'red' };
 
 export default function InvitesCard() {
   const db = useDb();
-  const toast = useToast();
   const { busy, run } = useAction();
   const [email, setEmail] = useState('');
   const [nome, setNome] = useState('');
@@ -68,12 +67,6 @@ export default function InvitesCard() {
 
   const e = normalizeEmail(email);
   const emailOk = isEmailFormat(e) && isAllowedDomain(e);
-  const msg = sent && `Olá${sent.nome ? ' ' + sent.nome.split(' ')[0] : ''}! Você foi convidado para o sistema de Gestão de Atividades e Férias do Contrato AMP. Acesse o link para criar sua senha e completar seu cadastro (vale por 7 dias): ${sent.link}`;
-  const copy = async (t: string) => {
-    await navigator.clipboard.writeText(t);
-    toast('success', 'Copiado.');
-  };
-
   return (
     <Card
       title={
@@ -124,38 +117,7 @@ export default function InvitesCard() {
           Enviar convite
         </Button>
 
-        {sent && (
-          <Alert kind={sent.enviado ? 'success' : 'warning'} title={sent.enviado ? `Convite enviado para ${sent.email}` : `Convite criado para ${sent.email}, mas o e-mail não saiu`}>
-            {!sent.enviado && (
-              <p className="mb-2">
-                O envio automático só chega a outros endereços depois que um domínio for verificado no Resend. Por enquanto, mande o link abaixo pela sua conta de e-mail ou pelo WhatsApp.
-              </p>
-            )}
-            <div className="mb-2 break-all rounded bg-white/70 px-2 py-1 font-mono text-[11px]">{sent.link}</div>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" icon={<Copy className="h-4 w-4" />} onClick={() => copy(sent.link)}>
-                Copiar link
-              </Button>
-              <Button size="sm" variant="secondary" icon={<Copy className="h-4 w-4" />} onClick={() => copy(msg!)}>
-                Copiar mensagem
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                icon={<Mail className="h-4 w-4" />}
-                onClick={() => (window.location.href = `mailto:${sent.email}?subject=${encodeURIComponent('Convite · Gestão de Atividades e Férias AMP')}&body=${encodeURIComponent(msg!)}`)}
-              >
-                Abrir no e-mail
-              </Button>
-              <Button size="sm" variant="secondary" icon={<MessageCircle className="h-4 w-4" />} onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(msg!)}`, '_blank', 'noopener')}>
-                WhatsApp
-              </Button>
-              <Button size="sm" variant="ghost" icon={<X className="h-4 w-4" />} onClick={() => setSent(undefined)}>
-                Fechar
-              </Button>
-            </div>
-          </Alert>
-        )}
+        {sent && <InviteResult sent={sent} onClose={() => setSent(undefined)} />}
 
         {semAcesso.length > 0 && (
           <div className="rounded-lg border border-slate-200 p-3">
@@ -246,5 +208,47 @@ export default function InvitesCard() {
         </div>
       </div>
     </Card>
+  );
+}
+
+/** Resultado de um convite: link para copiar, abrir no e-mail ou WhatsApp. */
+export function InviteResult({ sent, onClose }: { sent: Sent; onClose: () => void }) {
+  const toast = useToast();
+  const msg = `Olá${sent.nome ? ' ' + sent.nome.split(' ')[0] : ''}! Você foi convidado para o sistema de Gestão de Atividades e Férias do Contrato AMP. Acesse o link para criar sua senha e completar seu cadastro (vale por 7 dias): ${sent.link}`;
+  const copy = async (t: string) => {
+    await navigator.clipboard.writeText(t);
+    toast('success', 'Copiado.');
+  };
+  return (
+          <Alert kind={sent.enviado ? 'success' : 'warning'} title={sent.enviado ? `Convite enviado para ${sent.email}` : `Convite criado para ${sent.email}, mas o e-mail não saiu`}>
+            {!sent.enviado && (
+              <p className="mb-2">
+                O envio automático só chega a outros endereços depois que um domínio for verificado no Resend. Por enquanto, mande o link abaixo pela sua conta de e-mail ou pelo WhatsApp.
+              </p>
+            )}
+            <div className="mb-2 break-all rounded bg-white/70 px-2 py-1 font-mono text-[11px]">{sent.link}</div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" icon={<Copy className="h-4 w-4" />} onClick={() => copy(sent.link)}>
+                Copiar link
+              </Button>
+              <Button size="sm" variant="secondary" icon={<Copy className="h-4 w-4" />} onClick={() => copy(msg)}>
+                Copiar mensagem
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<Mail className="h-4 w-4" />}
+                onClick={() => (window.location.href = `mailto:${sent.email}?subject=${encodeURIComponent('Convite · Gestão de Atividades e Férias AMP')}&body=${encodeURIComponent(msg)}`)}
+              >
+                Abrir no e-mail
+              </Button>
+              <Button size="sm" variant="secondary" icon={<MessageCircle className="h-4 w-4" />} onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank', 'noopener')}>
+                WhatsApp
+              </Button>
+              <Button size="sm" variant="ghost" icon={<X className="h-4 w-4" />} onClick={() => onClose()}>
+                Fechar
+              </Button>
+            </div>
+          </Alert>
   );
 }

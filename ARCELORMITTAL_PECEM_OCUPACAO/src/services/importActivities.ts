@@ -71,10 +71,16 @@ function hoursFrom(c: CellValue | undefined): { value?: number; auto?: number } 
   return { value, auto: m ? Number(m[1]) : undefined };
 }
 
-/** Linha de atestado médico / afastamento (por ID, descrição ou status). */
-export function isAbsenceText(parts: string[]): boolean {
-  const t = normKey(parts.join(' '));
-  return t.includes(ABSENCE_CODE) || /ATESTAD|AFASTAD|AFASTAMENTO|LICENCA MEDICA|AUXILIO DOENCA/.test(t);
+/**
+ * Linha de ausência (atestado médico, afastamento, doença ou falta), pelo ID, descrição ou status.
+ * A observação não conta: uma atividade comum pode citar "afastado" ali. "Falta" só vale
+ * sozinha ou como "Falta justificada/injustificada/abonada" (evita "falta de material" etc.).
+ */
+export function isAbsenceText(parts: string[], descricao = '', status = ''): boolean {
+  const t = normKey([...parts, descricao, status].join(' '));
+  if (t.includes(ABSENCE_CODE) || /ATESTAD|AFASTAD|AFASTAMENTO|LICENCA MEDICA|AUXILIO DOENCA|\bDOENCA\b|\bDOENTE\b|\bENFERMIDADE/.test(t)) return true;
+  const falta = /^FALTAS?(\s*[-:|(].*|\s+(JUSTIFICADA|INJUSTIFICADA|ABONADA|AO TRABALHO|NAO JUSTIFICADA)\b.*)?$/;
+  return falta.test(normKey(descricao)) || falta.test(normKey(status));
 }
 
 const MONTHS = 'JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ|JANEIRO|FEVEREIRO|MARCO|ABRIL|MAIO|JUNHO|JULHO|AGOSTO|SETEMBRO|OUTUBRO|NOVEMBRO|DEZEMBRO';
@@ -136,11 +142,12 @@ export function parseGrids(grids: Grid[]): { sheets: ParsedSheet[]; costCenters:
     for (const r of g.rows.slice(headerIdx + 1)) {
       const codigo = asText(r[ix.id]);
       const descricao = asText(r[ix.desc]);
-      if (!codigo || !descricao || normKey(codigo) === 'TOTAL') continue;
+      if (normKey(codigo) === 'TOTAL' || normKey(descricao) === 'TOTAL') continue;
+      const ausencia = !!descricao && isAbsenceText([codigo], descricao, asText(r[ix.st]));
+      // Linhas de ausência costumam vir sem ID; as demais precisam de ID e descrição.
+      if (!ausencia && (!codigo || !descricao)) continue;
       const eh = hoursFrom(r[ix.eh]);
       const hr = hoursFrom(r[ix.hr]);
-      // Só ID, descrição ou status identificam o afastamento (a observação de uma atividade comum pode citar "afastado").
-      const ausencia = isAbsenceText([codigo, descricao, asText(r[ix.st])]);
       const obs = asText(r[ix.obs]);
       rows.push({
         codigo: ausencia ? ABSENCE_CODE : codigo.toUpperCase(),
@@ -162,7 +169,7 @@ export function parseGrids(grids: Grid[]): { sheets: ParsedSheet[]; costCenters:
         centroCusto: asText(r[ix.cc]),
         status: ausencia ? 'Finalizado' : normalizeStatus(asText(r[ix.st])),
         // No afastamento, guarda o texto original da planilha na observação.
-        observacao: ausencia && normKey(descricao) !== normKey(ABSENCE_DESC) ? [descricao, obs].filter(Boolean).join(' · ') : obs,
+        observacao: ausencia && normKey(descricao) !== normKey(ABSENCE_DESC) ? [descricao.toUpperCase(), obs].filter(Boolean).join(' · ') : obs,
       });
       if (ausencia) {
         const x = rows[rows.length - 1];
@@ -171,13 +178,14 @@ export function parseGrids(grids: Grid[]): { sheets: ParsedSheet[]; costCenters:
         x.terminoReal ??= x.estTermino ?? x.inicioReal;
         x.estInicio ??= x.inicioReal;
         x.estTermino ??= x.terminoReal;
-        x.horasRealizadas = undefined;
+        // As horas da planilha são mantidas (aparecem no relatório oficial), mas não contam como carga.
         x.estHoras = undefined;
         x.estModo = 'manual';
         x.realModo = 'manual';
         x.horasDia = undefined;
         x.horasDiaReal = undefined;
-        if (!x.terminoReal) x.status = 'Em andamento';
+        if (x.centroCusto === '-') x.centroCusto = '';
+        x.status = x.terminoReal ? 'Finalizado' : 'Em andamento';
       }
     }
     sheets.push({ sheet: g.name, hidden: g.hidden, nome: find('COLABORADOR') || nameFromSheet(g.name), matricula: find('MATRICULA'), funcao: find('FUNCAO'), periodo: find('PERIODO'), rows });
@@ -216,28 +224,43 @@ export function compare(sheets: ParsedSheet[]): CompareRow[] {
   const out = new Map<string, CompareRow>();
   const acts = db.all('activities');
   const newCollabs = new Map<string, Collaborator>();
-  for (const sh of sheets) {
-    if (!sh.rows.length) continue;
-    const existingCollab = matchCollaborator(sh.nome, sh.matricula);
-    let novo: Collaborator | undefined;
-    if (!existingCollab) {
-      const k = normKey(sh.matricula || sh.nome || sh.sheet);
-      novo = newCollabs.get(k);
-      if (!novo) {
-        novo = { id: uid('c_'), nome: (sh.nome || sh.sheet).toUpperCase(), matricula: sh.matricula, funcao: sh.funcao.toUpperCase(), ativo: true };
-        newCollabs.set(k, novo);
+  const startOf = (x: { inicioReal?: string; estInicio?: string }) => x.inicioReal ?? x.estInicio ?? '';
+  // 1º passo: colaborador de cada aba (existente ou novo).
+  const resolved = sheets
+    .filter((sh) => sh.rows.length)
+    .map((sh) => {
+      const existingCollab = matchCollaborator(sh.nome, sh.matricula);
+      let novo: Collaborator | undefined;
+      if (!existingCollab) {
+        const k = normKey(sh.matricula || sh.nome || sh.sheet);
+        novo = newCollabs.get(k);
+        if (!novo) {
+          novo = { id: uid('c_'), nome: (sh.nome || sh.sheet).toUpperCase(), matricula: sh.matricula, funcao: sh.funcao.toUpperCase(), ativo: true };
+          newCollabs.set(k, novo);
+        }
       }
-    }
-    const collabId = existingCollab?.id ?? novo!.id;
+      return { sh, existingCollab, novo, collabId: existingCollab?.id ?? novo!.id };
+    });
+  // Trechos (inícios distintos) de cada ID por colaborador, somando todas as abas.
+  const trechos = new Map<string, Set<string>>();
+  for (const { sh, collabId } of resolved)
     for (const p of sh.rows) {
-      // A chave é colaborador + ID: o mesmo ID em colaboradores diferentes são atividades distintas.
-      // Afastamentos usam sempre o mesmo ID, então o período (data de início) também entra na chave.
-      const absence = p.codigo === ABSENCE_CODE;
-      const inicio = p.inicioReal ?? p.estInicio ?? '';
-      const key = absence ? `${collabId}|${p.codigo}|${inicio}` : `${collabId}|${p.codigo}`;
-      const existing = existingCollab
-        ? acts.find((a) => a.collaboratorId === existingCollab.id && a.codigo.toUpperCase() === p.codigo && (!absence || (a.inicioReal ?? a.estInicio ?? '') === inicio))
-        : undefined;
+      const k = `${collabId}|${p.codigo}`;
+      if (!trechos.has(k)) trechos.set(k, new Set());
+      trechos.get(k)!.add(startOf(p));
+    }
+  for (const { sh, existingCollab, novo, collabId } of resolved) {
+    for (const p of sh.rows) {
+      // Chave = colaborador + ID + início. O mesmo ID pode aparecer para colaboradores diferentes e,
+      // para o mesmo colaborador, em vários trechos (ex.: interrompido por atestado): cada trecho é
+      // uma linha própria, como no relatório oficial. A mesma linha repetida em abas de meses
+      // diferentes (mesmo início) é consolidada.
+      const inicio = startOf(p);
+      const key = `${collabId}|${p.codigo}|${inicio}`;
+      const sameId = existingCollab ? acts.filter((a) => a.collaboratorId === existingCollab.id && a.codigo.toUpperCase() === p.codigo) : [];
+      // Sem trecho com o mesmo início: se no sistema e na planilha só há um trecho desse ID, é a mesma atividade (com datas alteradas).
+      const existing =
+        sameId.find((a) => startOf(a) === inicio) ?? (p.codigo !== ABSENCE_CODE && sameId.length === 1 && trechos.get(`${collabId}|${p.codigo}`)!.size === 1 ? sameId[0] : undefined);
       const diffs: CompareRow['diffs'] = [];
       if (existing) {
         const sys: Record<string, unknown> = { ...existing, estHoras: computeEstHours(existing), horasRealizadas: computeRealHours(existing) };

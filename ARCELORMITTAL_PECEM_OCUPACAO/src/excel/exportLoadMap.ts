@@ -1,4 +1,5 @@
 // Exportação do Mapa de Carga: Gantt (carga diária + barras das atividades) e tabela, em Excel e PDF.
+import { importFresh } from '../lib/reload';
 import ExcelJS from 'exceljs';
 import { fmtBR, fmtDateTimeBR, isWeekend, MONTHS_ABBR } from '../lib/dates';
 import type { Activity } from '../types';
@@ -10,6 +11,7 @@ export interface LoadDay {
   n: number;
   off: boolean; // fim de semana ou feriado
   vac: boolean; // férias aprovadas
+  abs?: boolean; // ausência: atestado, afastamento, doença ou falta (ID 0510-0000)
 }
 export interface LoadRow {
   a: Activity;
@@ -46,11 +48,14 @@ const STATUS_HEX: Record<string, string> = {
   Cancelado: 'FCA5A5',
 };
 const LATE_HEX = 'EF4444';
+const ABS_HEX = '9333EA'; // roxo: ausência (atestado, afastamento, doença, falta)
+const isAbs = (a: Activity) => a.codigo.trim().toUpperCase() === '0510-0000';
 const NAVY = '1F3864';
 
 /** Cor da célula de carga diária, mesma regra da tela. */
 function heat(day: LoadDay, limite: number): { hex: string; white?: boolean } {
   if (day.vac) return { hex: 'DDD6FE' };
+  if (day.abs && !day.off) return { hex: ABS_HEX, white: true };
   if (day.off) return { hex: 'F1F5F9' };
   if (day.h === 0) return { hex: 'E2E8F0' };
   if (day.h > limite) return { hex: 'EF4444', white: true };
@@ -60,7 +65,7 @@ function heat(day: LoadDay, limite: number): { hex: string; white?: boolean } {
 
 const fmtH = (h: number) => (h % 1 ? h.toFixed(1) : String(h));
 const fileBase = (m: LoadModel) => `Mapa_de_Carga_AMP_${safeFileName(`${m.start}_a_${m.end}`)}`;
-const LEGEND = 'Legenda: verde = carga adequada · amarelo = abaixo de 75% · vermelho = acima do limite diário · cinza = ocioso · lilás = férias · barra vermelha = atraso · ◆ = término previsto';
+const LEGEND = 'Legenda: verde = carga adequada · amarelo = abaixo de 75% · vermelho = acima do limite diário · cinza = ocioso · lilás = férias · roxo (AT) = atestado/afastamento/falta · barra vermelha = atraso · ◆ = término previsto';
 
 // ---------------------------------------------------------------- Excel
 export async function exportLoadMapExcel(m: LoadModel) {
@@ -132,7 +137,7 @@ export async function exportLoadMapExcel(m: LoadModel) {
       const c = row.getCell(D0 + i);
       const hc = heat(day, m.limiteDia);
       c.fill = fill(hc.hex);
-      c.value = day.vac ? 'F' : !day.off && day.h > 0 ? Number(day.h.toFixed(1)) : null;
+      c.value = day.vac ? 'F' : day.abs && !day.off ? 'AT' : !day.off && day.h > 0 ? Number(day.h.toFixed(1)) : null;
       c.font = { size: 8, bold: true, color: { argb: hc.white ? 'FFFFFFFF' : 'FF334155' } };
       c.alignment = { horizontal: 'center', vertical: 'middle' };
       c.border = day.n >= 2 && !day.vac ? { top: { style: 'medium', color: { argb: 'FF7C3AED' } }, bottom: { style: 'medium', color: { argb: 'FF7C3AED' } }, left: { style: 'medium', color: { argb: 'FF7C3AED' } }, right: { style: 'medium', color: { argb: 'FF7C3AED' } } } : thin;
@@ -154,7 +159,7 @@ export async function exportLoadMapExcel(m: LoadModel) {
         c.border = thin;
         if (d >= x.start && d <= x.end) {
           const late = x.late && x.a.estTermino && d > x.a.estTermino;
-          c.fill = fill(late ? LATE_HEX : STATUS_HEX[x.a.status] ?? '94A3B8');
+          c.fill = fill(isAbs(x.a) ? ABS_HEX : late ? LATE_HEX : STATUS_HEX[x.a.status] ?? '94A3B8');
         } else if (isWeekend(d)) c.fill = fill('F8FAFC');
         if (x.a.estTermino === d) {
           c.value = '◆';
@@ -206,7 +211,7 @@ export async function exportLoadMapExcel(m: LoadModel) {
 const rgb = (hex: string): [number, number, number] => [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
 
 export async function exportLoadMapPdf(m: LoadModel) {
-  const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
+  const [{ jsPDF }, { default: autoTable }] = await importFresh(() => Promise.all([import('jspdf'), import('jspdf-autotable')]));
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
@@ -263,6 +268,7 @@ export async function exportLoadMapPdf(m: LoadModel) {
     item('EF4444', `> ${m.limiteDia} h/dia`);
     item('E2E8F0', 'Ocioso');
     item('DDD6FE', 'Férias');
+    item(ABS_HEX, 'Ausência (AT)');
     doc.setTextColor(60);
     doc.text('Losango = término previsto', lx, ly);
     // cabeçalho de dias
@@ -329,7 +335,7 @@ export async function exportLoadMapPdf(m: LoadModel) {
         doc.setLineWidth(0.35);
         doc.rect(gx + i * dw + 0.3, y + 0.45, dw - 0.6, ROW - 0.9, 'S');
       }
-      const label = day.vac ? 'F' : !day.off && day.h > 0 ? fmtH(Number(day.h.toFixed(1))) : '';
+      const label = day.vac ? 'F' : day.abs && !day.off ? 'AT' : !day.off && day.h > 0 ? fmtH(Number(day.h.toFixed(1))) : '';
       if (label && dw >= 2.6) {
         doc.setFontSize(dw < 4 ? 4.5 : 6);
         doc.setTextColor(hc.white ? 255 : 51);
@@ -361,9 +367,9 @@ export async function exportLoadMapPdf(m: LoadModel) {
       const ei = eiRaw < 0 ? m.days.length - 1 : eiRaw;
       const bx = gx + si * dw;
       const bw = (ei - si + 1) * dw;
-      doc.setFillColor(...rgb(STATUS_HEX[x.a.status] ?? '94A3B8'));
+      doc.setFillColor(...rgb(isAbs(x.a) ? ABS_HEX : STATUS_HEX[x.a.status] ?? '94A3B8'));
       doc.roundedRect(bx, y + 1, bw, ROW - 2, 0.6, 0.6, 'F');
-      if (x.late && x.a.estTermino) {
+      if (x.late && x.a.estTermino && !isAbs(x.a)) {
         const li = m.days.findIndex((d) => d > x.a.estTermino!);
         if (li >= 0 && li <= ei) {
           const lx = gx + Math.max(li, si) * dw;

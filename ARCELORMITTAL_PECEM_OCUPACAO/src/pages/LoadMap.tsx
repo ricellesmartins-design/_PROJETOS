@@ -60,6 +60,13 @@ export default function LoadMap() {
     return { h: on.reduce((s, a) => s + dailyLoad(a), 0), n: on.length };
   };
 
+  const absentOn = (list: Activity[], d: string) =>
+    list.some((a) => {
+      if (!isAbsence(a) || a.status === 'Cancelado') return false;
+      const w = executionWindow(a, today);
+      return !!w && w.start <= d && w.end >= d;
+    });
+
   const { busy, run } = useAction();
   const buildModel = (): LoadModel => {
     const wk = weekStart(today);
@@ -88,7 +95,7 @@ export default function LoadMap() {
         return {
           title: g.title,
           weekH: groupBy === 'colaborador' ? Array.from({ length: 7 }, (_, i) => loadOf(g.list, addDays(wk, i)).h).reduce((s, h) => s + h, 0) : undefined,
-          daily: days.map((d) => ({ d, ...loadOf(g.list, d), off: isWeekend(d) || !!findHoliday(d, settings.feriadosExtras), vac: myVac.some((p) => p.inicio <= d && p.fim >= d) })),
+          daily: days.map((d) => ({ d, ...loadOf(g.list, d), off: isWeekend(d) || !!findHoliday(d, settings.feriadosExtras), vac: myVac.some((p) => p.inicio <= d && p.fim >= d), abs: absentOn(g.list, d) })),
           rows: g.list.map((a) => {
             const w = executionWindow(a, today)!;
             return { a, colaborador: collaboratorName(a.collaboratorId), start: w.start, end: w.end, previsto: w.previsto, late: !!(isLate(a, today) && !isClosed(a) && a.estTermino), hDia: dailyLoad(a) };
@@ -203,7 +210,7 @@ export default function LoadMap() {
           <span className="hatch inline-block h-3 w-5 rounded" /> férias aprovadas
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block h-3 w-5 rounded bg-pink-300" /> afastado | atestado (ID 0510-0000)
+          <span className="inline-block h-3 w-5 rounded bg-purple-600" /> ausência: atestado, afastamento, doença ou falta (ID 0510-0000)
         </span>
         <span className="flex items-center gap-1">
           <span className="inline-block h-3 w-5 rounded bg-red-500" /> &gt; {settings.limiteDia} h/dia
@@ -257,14 +264,10 @@ export default function LoadMap() {
                       </div>
                       {days.map((d) => {
                         const onVac = myVac.some((p) => p.inicio <= d && p.fim >= d);
-                        const onAbs = !onVac && g.list.some((a) => {
-                          if (!isAbsence(a) || a.status === 'Cancelado') return false;
-                          const w = executionWindow(a, today);
-                          return !!w && w.start <= d && w.end >= d;
-                        });
+                        const onAbs = !onVac && absentOn(g.list, d);
                         const { h, n } = loadOf(g.list, d);
                         const off = isWeekend(d) || !!findHoliday(d, settings.feriadosExtras);
-                        const color = onVac ? 'hatch' : onAbs && !off ? 'bg-pink-300 text-pink-900' : off ? 'bg-slate-100' : h === 0 ? 'bg-slate-200' : h > settings.limiteDia ? 'bg-red-500 text-white' : h >= settings.limiteDia * 0.75 ? 'bg-emerald-500 text-white' : 'bg-amber-300';
+                        const color = onVac ? 'hatch' : onAbs && !off ? 'bg-purple-600 text-white' : off ? 'bg-slate-100' : h === 0 ? 'bg-slate-200' : h > settings.limiteDia ? 'bg-red-500 text-white' : h >= settings.limiteDia * 0.75 ? 'bg-emerald-500 text-white' : 'bg-amber-300';
                         return (
                           <div
                             key={d}
@@ -298,18 +301,18 @@ export default function LoadMap() {
                       return (
                         <div key={a.id} className="flex items-center hover:bg-blue-50/40">
                           <div className="w-[300px] shrink-0 truncate border-r px-3 py-1 text-xs" title={a.descricao}>
-                            <span className="font-mono text-slate-500">{a.codigo}</span> {a.descricao}
+                            <span className="font-mono text-slate-500">{a.codigo}</span> {isAbsence(a) ? <b className="text-purple-700">{a.observacao?.split(' · ')[0] || a.descricao}</b> : a.descricao}
                             {groupBy === 'area' && <span className="text-slate-400"> · {collaboratorName(a.collaboratorId)}</span>}
                           </div>
                           <div className="gantt-grid relative h-6 shrink-0" style={{ width: days.length * DAY_W, backgroundSize: `${DAY_W}px 100%` }}>
                             {today >= start && today <= end && <div className="absolute inset-y-0 w-0.5 bg-idg-orange" style={{ left: (diffDays(start, today) + 0.5) * DAY_W }} />}
                             <div
-                              className={cx('absolute top-1 h-4 overflow-hidden rounded text-[10px] leading-4 text-white', BAR[a.status])}
+                              className={cx('absolute top-1 h-4 overflow-hidden rounded text-[10px] leading-4 text-white', isAbsence(a) ? 'bg-purple-600' : BAR[a.status])}
                               style={{ left, width }}
                               title={`${a.codigo} · ${a.status}\n${fmtBR(w.start)} → ${fmtBR(w.end)}${w.previsto ? ' (previsto)' : ''}\nTérmino previsto: ${fmtBR(a.estTermino) || '—'}\n${dailyLoad(a)} h/dia`}
                             >
-                              {late && lateLeft < width && <div className="absolute inset-y-0 right-0 bg-red-500/90" style={{ left: lateLeft, backgroundImage: 'repeating-linear-gradient(45deg,#fff5 0 3px,transparent 3px 6px)' }} />}
-                              <span className="relative px-1">{dailyLoad(a)}h/d</span>
+                              {!isAbsence(a) && late && lateLeft < width && <div className="absolute inset-y-0 right-0 bg-red-500/90" style={{ left: lateLeft, backgroundImage: 'repeating-linear-gradient(45deg,#fff5 0 3px,transparent 3px 6px)' }} />}
+                              <span className="relative px-1">{isAbsence(a) ? 'AUSÊNCIA' : `${dailyLoad(a)}h/d`}</span>
                             </div>
                             {estEndPos !== undefined && (
                               <div className="absolute top-0.5 -translate-x-1/2 text-[11px] text-idg-navy" style={{ left: estEndPos }}>

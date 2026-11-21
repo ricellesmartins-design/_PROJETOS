@@ -1,5 +1,5 @@
 // Service Worker: cache do app (abre offline/rápido) e notificações push dos lembretes diários.
-const CACHE = 'idg-amp-v1';
+const CACHE = 'idg-amp-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
