@@ -4,7 +4,11 @@ const KEY = 'amp-theme';
 const media = window.matchMedia('(prefers-color-scheme: dark)');
 const listeners = new Set<() => void>();
 
+// Modo captura (fotos das telas para o Manual): sempre tema claro.
+export const CAPTURE_MODE = new URLSearchParams(window.location.search).get('captura') ?? '';
+
 export const getThemePref = (): ThemePref => {
+  if (CAPTURE_MODE) return 'light';
   const v = localStorage.getItem(KEY);
   return v === 'light' || v === 'dark' ? v : 'system';
 };

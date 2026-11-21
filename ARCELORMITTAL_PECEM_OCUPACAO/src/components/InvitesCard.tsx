@@ -119,6 +119,8 @@ export default function InvitesCard() {
 
         {sent && <InviteResult sent={sent} onClose={() => setSent(undefined)} />}
 
+        <TeamMessage />
+
         {semAcesso.length > 0 && (
           <div className="rounded-lg border border-slate-200 p-3">
             <div className="mb-2 flex items-center justify-between gap-2 text-sm font-medium">
@@ -223,7 +225,7 @@ export function InviteResult({ sent, onClose }: { sent: Sent; onClose: () => voi
           <Alert kind={sent.enviado ? 'success' : 'warning'} title={sent.enviado ? `Convite enviado para ${sent.email}` : `Convite criado para ${sent.email}, mas o e-mail não saiu`}>
             {!sent.enviado && (
               <p className="mb-2">
-                O envio automático só chega a outros endereços depois que um domínio for verificado no Resend. Por enquanto, mande o link abaixo pela sua conta de e-mail ou pelo WhatsApp.
+                O envio automático falhou (confira a senha de app do Gmail cadastrada no Supabase). Por enquanto, mande o link abaixo pela sua conta de e-mail ou pelo WhatsApp.
               </p>
             )}
             <div className="mb-2 break-all rounded bg-white/70 px-2 py-1 font-mono text-[11px]">{sent.link}</div>
@@ -250,5 +252,42 @@ export function InviteResult({ sent, onClose }: { sent: Sent; onClose: () => voi
               </Button>
             </div>
           </Alert>
+  );
+}
+
+/** Mensagem pronta para a equipe: link do site + como criar a conta com o e-mail corporativo. */
+function TeamMessage() {
+  const toast = useToast();
+  const site = window.location.origin;
+  const msg = `Olá! Já está no ar o sistema de Gestão de Atividades e Férias do Contrato AMP: ${site}
+
+Para entrar pela primeira vez:
+1. Abra o link e toque em "Criar conta".
+2. Use o seu e-mail corporativo (@idg-eng.com ou @idg.global), o mesmo que está no seu cadastro.
+3. Informe nome completo, matrícula e função e crie uma senha (mínimo 8 caracteres).
+Pronto: suas atividades e férias já aparecem.
+
+No celular dá para instalar como app: botão "Instalar app" na tela de entrada.
+Esqueceu a senha? Fale comigo que eu redefino.`;
+  const copy = async () => {
+    await navigator.clipboard.writeText(msg);
+    toast('success', 'Mensagem copiada.');
+  };
+  return (
+    <div className="rounded-lg border border-slate-200 p-3">
+      <div className="mb-1 text-sm font-medium">Mensagem pronta para a equipe (sem depender de e-mail)</div>
+      <p className="mb-2 text-xs text-slate-500">
+        Mande no grupo do WhatsApp. Cada pessoa cria a própria conta com o e-mail corporativo e já fica vinculada ao seu cadastro de colaborador, inclusive quem tem convite pendente.
+      </p>
+      <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-slate-50 px-2 py-1 text-[11px]">{msg}</pre>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" icon={<Copy className="h-4 w-4" />} onClick={copy}>
+          Copiar mensagem
+        </Button>
+        <Button size="sm" variant="secondary" icon={<MessageCircle className="h-4 w-4" />} onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank', 'noopener')}>
+          Enviar pelo WhatsApp
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   Bell,
+  BookOpen,
   CalendarCheck,
   CalendarDays,
   ClipboardList,
@@ -35,6 +36,8 @@ import HrRecon from './pages/HrRecon';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Account from './pages/Account';
+import Manual from './pages/Manual';
+import { CAPTURE_MODE } from './lib/theme';
 import logo from './templates/logo-idg-default.png';
 
 type NavItem = { to: string; label: string; icon: React.ReactNode; show: (u: Profile) => boolean; badge?: (u: Profile) => number };
@@ -56,6 +59,7 @@ const NAV: NavItem[] = [
   { to: '/relatorios', label: 'Relatórios', icon: <BarChart3 className="h-4 w-4" />, show: (u) => can.reports(u) },
   { to: '/configuracoes', label: 'Configurações', icon: <SettingsIcon className="h-4 w-4" />, show: (u) => can.settings(u) },
   { to: '/conta', label: 'Minha conta e lembretes', icon: <UserCircle className="h-4 w-4" />, show: () => true },
+  { to: '/manual', label: 'Manual', icon: <BookOpen className="h-4 w-4" />, show: () => true },
 ];
 
 function Shell({ realUser, onLogout }: { realUser: Profile; onLogout: () => void }) {
@@ -66,7 +70,7 @@ function Shell({ realUser, onLogout }: { realUser: Profile; onLogout: () => void
   const user = useMemo<Profile>(() => (viewAs ? { ...realUser, role: viewAs.role, collaboratorId: viewAs.collaboratorId } : realUser), [realUser, viewAs]);
 
   useEffect(() => {
-    if (realUser.role !== 'colaborador' || !realUser.collaboratorId) return;
+    if (CAPTURE_MODE || realUser.role !== 'colaborador' || !realUser.collaboratorId) return;
     return startLocalReminders(
       () => db.all('activities').filter((a) => a.collaboratorId === realUser.collaboratorId && ['Não Iniciado', 'Em andamento', 'Aguardando Cliente'].includes(a.status)).length,
     );
@@ -102,6 +106,9 @@ function Shell({ realUser, onLogout }: { realUser: Profile; onLogout: () => void
       break;
     case '/conta':
       page = <Account />;
+      break;
+    case '/manual':
+      page = <Manual />;
       break;
     default:
       page = <Dashboard />;
@@ -238,7 +245,8 @@ export default function App() {
 
   return (
     <ToastProvider>
-      {acesso && (
+      {CAPTURE_MODE === 'login' && <Login onLogged={() => undefined} />}
+      {CAPTURE_MODE !== 'login' && acesso && (
         <AccessLink
           acesso={acesso}
           onCancel={closeAccess}
@@ -249,12 +257,12 @@ export default function App() {
           }}
         />
       )}
-      {!acesso && state === 'loading' && (
+      {CAPTURE_MODE !== 'login' && !acesso && state === 'loading' && (
         <div className="flex min-h-screen items-center justify-center gap-2 text-slate-500">
           <Loader2 className="h-5 w-5 animate-spin" /> Carregando…
         </div>
       )}
-      {!acesso && state === 'out' && (
+      {CAPTURE_MODE !== 'login' && !acesso && state === 'out' && (
         <>
           {error && <div className="fixed inset-x-0 top-0 z-50 bg-red-600 px-4 py-2 text-center text-sm text-white">{error}</div>}
           <Login
@@ -265,7 +273,7 @@ export default function App() {
           />
         </>
       )}
-      {!acesso && state === 'in' && profile && (
+      {CAPTURE_MODE !== 'login' && !acesso && state === 'in' && profile && (
         <Shell
           realUser={profile}
           onLogout={async () => {
