@@ -1,5 +1,6 @@
 // Contas de acesso: cadastro restrito por domínio corporativo, convites do coordenador,
-// "Esqueci minha senha" e redefinição de senha pelo coordenador.
+// "Esqueci minha senha", redefinição de senha pelo coordenador e acesso com senha padrão
+// (app_metadata.trocar_senha obriga a pessoa a criar a própria senha no primeiro acesso).
 // Convites e recuperação usam um link próprio (?acesso=<id>.<token>): o token fica só como hash
 // SHA-256 em app_metadata (que o usuário não consegue alterar) e o e-mail sai pelo Gmail (ou Resend).
 import { createClient, type SupabaseClient, type User } from 'npm:@supabase/supabase-js@2';
@@ -31,6 +32,11 @@ type Convite = { nome?: string; role: string; collaboratorId?: string; por: stri
 async function sha256(s: string) {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+/** Senha padrão dos acessos criados pelo coordenador (fica em app_secrets, fora do repositório). */
+async function defaultPassword(admin: Admin) {
+  const { data } = await admin.from('app_secrets').select('value').eq('name', 'senha_padrao').maybeSingle();
+  return String(data?.value ?? '');
 }
 const randomToken = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('');
 
@@ -152,12 +158,17 @@ async function createProfile(admin: Admin, p: { id: string; email: string; nome:
   return { role: p.role, vinculoPendente: p.role === 'colaborador' && !collaboratorId };
 }
 
-async function coordinator(admin: Admin, req: Request) {
+async function caller(admin: Admin, req: Request) {
   const token = (req.headers.get('authorization') ?? '').replace('Bearer ', '');
   const { data: u } = await admin.auth.getUser(token);
-  if (!u.user) return undefined;
-  const { data: me } = await admin.from('profiles').select('role, ativo, nome').eq('id', u.user.id).single();
-  return me?.role === 'coordenador' && me.ativo ? { id: u.user.id, nome: me.nome as string } : undefined;
+  return u.user ?? undefined;
+}
+
+async function coordinator(admin: Admin, req: Request) {
+  const user = await caller(admin, req);
+  if (!user) return undefined;
+  const { data: me } = await admin.from('profiles').select('role, ativo, nome').eq('id', user.id).single();
+  return me?.role === 'coordenador' && me.ativo ? { id: user.id, nome: me.nome as string } : undefined;
 }
 
 Deno.serve(async (req) => {
@@ -168,17 +179,86 @@ Deno.serve(async (req) => {
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
     const action = String(body.action ?? 'signup');
 
+    // ---------- Troca obrigatória da senha padrão (qualquer usuário logado) ----------
+    if (action === 'change_password') {
+      const user = await caller(admin, req);
+      if (!user) return json({ error: 'Sessão expirada. Entre novamente.' }, 401);
+      const nova = String(body.password ?? '');
+      if (nova.length < 8) return json({ error: 'A senha deve ter pelo menos 8 caracteres.' }, 400);
+      const padrao = await defaultPassword(admin);
+      if (padrao && nova === padrao) return json({ error: 'Escolha uma senha diferente da senha padrão.' }, 400);
+      const meta = { ...user.app_metadata };
+      delete meta.trocar_senha;
+      const { error } = await admin.auth.admin.updateUserById(user.id, { password: nova, app_metadata: meta });
+      if (error) return json({ error: error.message }, 400);
+      return json({ ok: true });
+    }
+
     // ---------- Ações do coordenador ----------
-    if (['reset', 'invite', 'invites', 'cancel_invite'].includes(action)) {
+    if (['reset', 'invite', 'invites', 'cancel_invite', 'create_user', 'default_password'].includes(action)) {
       const me = await coordinator(admin, req);
       if (!me) return json({ error: 'Apenas o coordenador pode fazer isso.' }, 403);
 
+      if (action === 'default_password') {
+        if (body.value === undefined) return json({ ok: true, value: await defaultPassword(admin) });
+        const v = String(body.value);
+        if (v.length < 8) return json({ error: 'A senha padrão deve ter pelo menos 8 caracteres.' }, 400);
+        const { error } = await admin.from('app_secrets').upsert({ name: 'senha_padrao', value: v });
+        if (error) return json({ error: error.message }, 400);
+        return json({ ok: true, value: v });
+      }
+
       if (action === 'reset') {
-        const nova = String(body.password ?? '');
-        if (nova.length < 8) return json({ error: 'A senha deve ter pelo menos 8 caracteres.' }, 400);
-        const { error } = await admin.auth.admin.updateUserById(String(body.userId), { password: nova });
+        const nova = body.padrao ? await defaultPassword(admin) : String(body.password ?? '');
+        if (nova.length < 8) return json({ error: body.padrao ? 'Defina a senha padrão em Configurações › Usuários.' : 'A senha deve ter pelo menos 8 caracteres.' }, 400);
+        const { data } = await admin.auth.admin.getUserById(String(body.userId));
+        if (!data?.user) return json({ error: 'Usuário não encontrado.' }, 404);
+        // Quem recebe senha do coordenador cria a própria no próximo acesso (exceto o próprio coordenador).
+        const meta = { ...data.user.app_metadata, trocar_senha: data.user.id !== me.id };
+        const { error } = await admin.auth.admin.updateUserById(data.user.id, { password: nova, app_metadata: meta });
         if (error) return json({ error: error.message }, 400);
         return json({ ok: true });
+      }
+
+      if (action === 'create_user') {
+        const email = String(body.email ?? '').trim().toLowerCase();
+        const role = String(body.role ?? '');
+        const collaboratorId = body.collaboratorId ? String(body.collaboratorId) : undefined;
+        let nome = String(body.nome ?? '').trim();
+        if (!isEmail(email)) return json({ error: 'Informe um e-mail válido.' }, 400);
+        if (!ALLOWED.includes(email.split('@')[1])) return json({ error: domainMsg() }, 400);
+        if (!ROLES.includes(role)) return json({ error: 'Perfil inválido.' }, 400);
+        const senha = await defaultPassword(admin);
+        if (senha.length < 8) return json({ error: 'Defina primeiro a senha padrão em Configurações › Usuários.' }, 400);
+        if (nome.length < 3 && collaboratorId) {
+          const { data: c } = await admin.from('collaborators').select('nome').eq('id', collaboratorId).maybeSingle();
+          nome = String(c?.nome ?? '');
+        }
+        if (nome.length < 3) return json({ error: 'Informe o nome da pessoa.' }, 400);
+        let user = await findUserByEmail(admin, email);
+        if (user && (await hasProfile(admin, user.id))) return json({ error: 'Este e-mail já tem acesso ao sistema. Use o botão Senha em Usuários para voltar à senha padrão.' }, 400);
+        const convite: Convite = { nome, role, collaboratorId, por: me.nome, em: new Date().toISOString(), aceitoEm: new Date().toISOString() };
+        let criado = false;
+        if (user) {
+          // Havia um convite pendente: vira acesso com senha padrão.
+          const meta = { ...user.app_metadata, convite, trocar_senha: true };
+          delete meta.acesso;
+          const { error } = await admin.auth.admin.updateUserById(user.id, { password: senha, app_metadata: meta, user_metadata: { nome } });
+          if (error) return json({ error: error.message }, 400);
+        } else {
+          const { data, error } = await admin.auth.admin.createUser({ email, password: senha, email_confirm: true, user_metadata: { nome }, app_metadata: { convite, trocar_senha: true } });
+          if (error || !data.user) return json({ error: error?.message ?? 'Falha ao criar o acesso.' }, 400);
+          user = data.user;
+          criado = true;
+        }
+        try {
+          const r = await createProfile(admin, { id: user.id, email, nome, role, matricula: String(body.matricula ?? '').trim(), funcao: String(body.funcao ?? '').trim(), collaboratorId: role === 'colaborador' ? collaboratorId : undefined, confiavel: true });
+          await admin.from('job_runs').insert({ job: 'acesso_senha_padrao', detail: { email, role, por: me.nome } });
+          return json({ ok: true, email, ...r });
+        } catch (e) {
+          if (criado) await admin.auth.admin.deleteUser(user.id);
+          throw e;
+        }
       }
 
       if (action === 'invites') {
@@ -283,6 +363,7 @@ Deno.serve(async (req) => {
       if (precisaCadastro && nome.length < 3) return json({ error: 'Informe o nome completo.' }, 400);
       const meta = { ...user.app_metadata };
       delete meta.acesso; // link de uso único
+      delete meta.trocar_senha; // a pessoa acabou de criar a própria senha
       if (convite && precisaCadastro) meta.convite = { ...convite, aceitoEm: new Date().toISOString() };
       const { error } = await admin.auth.admin.updateUserById(user.id, { password, app_metadata: meta, ...(precisaCadastro ? { user_metadata: { nome } } : {}) });
       if (error) return json({ error: error.message }, 400);

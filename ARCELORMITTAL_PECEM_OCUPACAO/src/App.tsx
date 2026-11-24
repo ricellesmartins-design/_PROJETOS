@@ -19,13 +19,14 @@ import {
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { db, type Profile } from './lib/db';
-import { can, fetchProfile, logout, ROLE_LABEL } from './lib/auth';
+import { can, fetchProfile, logout, mustChangePassword, ROLE_LABEL } from './lib/auth';
 import { SessionProvider, useDb, useRoute, navigate } from './lib/store';
 import { startLocalReminders } from './lib/push';
 import { ToastProvider, cx, Badge } from './components/ui';
 import Login from './pages/Login';
 import { InstallButton, ThemeToggle } from './components/AppButtons';
 import AccessLink from './pages/AccessLink';
+import ForcePassword from './pages/ForcePassword';
 import Dashboard from './pages/Dashboard';
 import Activities from './pages/Activities';
 import ActivityImport from './pages/ActivityImport';
@@ -203,7 +204,7 @@ function Shell({ realUser, onLogout }: { realUser: Profile; onLogout: () => void
 }
 
 export default function App() {
-  const [state, setState] = useState<'loading' | 'out' | 'in'>('loading');
+  const [state, setState] = useState<'loading' | 'out' | 'in' | 'trocar'>('loading');
   const [profile, setProfile] = useState<Profile>();
   const [error, setError] = useState('');
   // Link de convite / nova senha enviado por e-mail (?acesso=<id>.<token>).
@@ -221,6 +222,11 @@ export default function App() {
       const p = await fetchProfile();
       if (!p) {
         setState('out');
+        return;
+      }
+      if (await mustChangePassword()) {
+        setProfile(p);
+        setState('trocar');
         return;
       }
       await db.load(p);
@@ -272,6 +278,19 @@ export default function App() {
             }}
           />
         </>
+      )}
+      {CAPTURE_MODE !== 'login' && !acesso && state === 'trocar' && profile && (
+        <ForcePassword
+          nome={profile.nome}
+          onDone={() => {
+            setState('loading');
+            boot();
+          }}
+          onLogout={async () => {
+            await logout();
+            setState('out');
+          }}
+        />
       )}
       {CAPTURE_MODE !== 'login' && !acesso && state === 'in' && profile && (
         <Shell
