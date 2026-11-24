@@ -80,6 +80,9 @@ Na tela de entrada, toque em **Esqueci minha senha**, informe o e-mail e toque e
 ## Convite
 O coordenador também pode mandar um convite. O link do convite vale por 7 dias e abre uma tela para criar a senha e completar o cadastro.
 
+## Primeiro acesso com senha padrão
+Se o coordenador criou o seu acesso com a **senha padrão**, entre com o e-mail corporativo e essa senha. O sistema abre a tela **Crie sua senha**: digite uma senha nova (mínimo 8 caracteres, diferente da padrão) duas vezes e toque em **Salvar senha e entrar**. O mesmo acontece quando o coordenador volta a sua senha para a padrão.
+
 ## Conhecendo a tela
 - **Menu lateral (à esquerda):** leva a cada módulo. No celular, abra pelo botão ☰. Só aparecem os itens do seu perfil.
 - **Barra superior:** nome da tela, seu nome e perfil, **Instalar app**, botão de **tema claro/escuro**, sino de **lembretes** e **Sair**.
@@ -374,7 +377,7 @@ Código, denominação e responsável. Dá para incluir, editar e excluir.
 Envia um link de cadastro (vale por 7 dias) e mostra os convites pendentes, aceitos e expirados, com **Reenviar** e **Cancelar**. O link pode ser copiado ou mandado por e-mail ou WhatsApp. A caixa **Mensagem pronta para a equipe** traz o texto com o link do sistema e o passo a passo para o grupo.
 
 ## Usuários e perfis de acesso
-Muda o perfil de cada usuário, liga o login a um colaborador, libera ou bloqueia o acesso e **redefine a senha**. O aviso **Vínculo pendente** mostra quem se cadastrou e ainda não foi ligado a um colaborador.`,
+Muda o perfil de cada usuário, liga o login a um colaborador, libera ou bloqueia o acesso e **redefine a senha** (digitada ou voltando para a senha padrão; a pessoa cria a própria no próximo acesso). No topo fica a **senha padrão de acesso**. Em Convidar pessoas, **Criar acesso com senha padrão** libera a pessoa na hora, sem e-mail. O aviso **Vínculo pendente** mostra quem se cadastrou e ainda não foi ligado a um colaborador.`,
   },
   {
     id: 'conta',

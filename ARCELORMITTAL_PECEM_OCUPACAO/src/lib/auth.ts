@@ -77,14 +77,30 @@ export async function logout() {
   db.clear();
 }
 
+/** Troca a senha do usuário logado (no servidor, que também libera a troca obrigatória da senha padrão). */
 export async function changePassword(nova: string) {
   if (nova.length < 8) throw new Error('A senha deve ter pelo menos 8 caracteres.');
-  const { error } = await supabase.auth.updateUser({ password: nova });
-  if (error) throw new Error(errMsg(error));
+  await invokeFunction('signup', { action: 'change_password', password: nova });
+  await supabase.auth.refreshSession();
 }
 
-export async function adminResetPassword(userId: string, nova: string) {
-  const { data, error } = await supabase.functions.invoke('signup', { body: { action: 'reset', userId, password: nova } });
+/** true quando o acesso foi criado/redefinido com senha do coordenador e a pessoa ainda não criou a própria. */
+export async function mustChangePassword() {
+  const { data } = await supabase.auth.getUser();
+  return !!data.user?.app_metadata?.trocar_senha;
+}
+
+// Senha padrão (fica no servidor, só o coordenador lê e altera) ---------------------------
+export const getDefaultPassword = async () => (await invokeFunction<{ value: string }>('signup', { action: 'default_password' })).value;
+export const setDefaultPassword = async (value: string) => (await invokeFunction<{ value: string }>('signup', { action: 'default_password', value })).value;
+/** Cria o acesso já liberado com a senha padrão; a pessoa troca a senha no primeiro acesso. */
+export const createUserWithDefault = (p: { email: string; role: Role; nome?: string; collaboratorId?: string }) =>
+  invokeFunction<{ email: string; vinculoPendente?: boolean }>('signup', { action: 'create_user', ...p, email: normalizeEmail(p.email) });
+
+/** Redefine a senha de um usuário: `nova` digitada ou a senha padrão. A pessoa troca no próximo acesso. */
+export async function adminResetPassword(userId: string, nova: string | { padrao: true }) {
+  const extra = typeof nova === 'string' ? { password: nova } : { padrao: true };
+  const { data, error } = await supabase.functions.invoke('signup', { body: { action: 'reset', userId, ...extra } });
   if (error) {
     let msg = errMsg(error);
     try {

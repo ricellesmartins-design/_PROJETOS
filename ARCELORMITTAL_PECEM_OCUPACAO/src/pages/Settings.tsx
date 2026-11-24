@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell, Database, Image as ImageIcon, KeyRound, Mail, Plus, RotateCcw, Save, Send, Trash2, UserCheck, UserX, Users } from 'lucide-react';
 import { useDb, useSession } from '../lib/store';
 import { invokeFunction } from '../lib/supabase';
-import { adminResetPassword, isAllowedDomain, isEmailFormat, normalizeEmail, ROLE_LABEL, sendInvite } from '../lib/auth';
+import { adminResetPassword, getDefaultPassword, setDefaultPassword, isAllowedDomain, isEmailFormat, normalizeEmail, ROLE_LABEL, sendInvite } from '../lib/auth';
 import { type Profile } from '../lib/db';
 import { uid } from '../lib/id';
 import { fmtBR, fmtDateTimeBR, holidaysOf, todayISO } from '../lib/dates';
@@ -618,6 +618,16 @@ function UsersCard({ currentUserId }: { currentUserId: string }) {
   const { busy, run } = useAction();
   const [reset, setReset] = useState<Profile>();
   const [pwd, setPwd] = useState('');
+  const [padrao, setPadrao] = useState('');
+  const [padraoSalvo, setPadraoSalvo] = useState<string>();
+  useEffect(() => {
+    getDefaultPassword()
+      .then((v) => {
+        setPadrao(v);
+        setPadraoSalvo(v);
+      })
+      .catch(() => setPadraoSalvo(''));
+  }, []);
   const profiles = [...db.all('profiles')].sort((a, b) => a.nome.localeCompare(b.nome));
   const collabs = db.all('collaborators');
   const pending = profiles.filter((p) => p.role === 'colaborador' && !p.collaboratorId);
@@ -631,6 +641,22 @@ function UsersCard({ currentUserId }: { currentUserId: string }) {
           </Alert>
         </div>
       )}
+      <div className="border-b border-slate-200 p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Senha padrão de acesso" hint="Usada ao criar acessos e ao voltar a senha de alguém. No primeiro acesso a pessoa é obrigada a criar a própria senha.">
+            <input className="input font-mono" value={padrao} placeholder={padraoSalvo === undefined ? 'carregando…' : 'mín. 8 caracteres'} onChange={(e) => setPadrao(e.target.value)} />
+          </Field>
+          <Button
+            size="sm"
+            icon={<Save className="h-4 w-4" />}
+            loading={busy}
+            disabled={padrao.length < 8 || padrao === padraoSalvo}
+            onClick={() => run(async () => setPadraoSalvo(await setDefaultPassword(padrao)), 'Senha padrão salva.')}
+          >
+            Salvar senha padrão
+          </Button>
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
@@ -708,21 +734,37 @@ function UsersCard({ currentUserId }: { currentUserId: string }) {
           onClose={() => setReset(undefined)}
           title={`Redefinir senha · ${reset.nome}`}
           footer={
-            <Button
-              loading={busy}
-              disabled={pwd.length < 8}
-              onClick={() =>
-                run(async () => {
-                  await adminResetPassword(reset.id, pwd);
-                  setReset(undefined);
-                }, 'Senha redefinida. Informe a nova senha ao usuário.')
-              }
-            >
-              Redefinir
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="secondary"
+                loading={busy}
+                disabled={!padraoSalvo}
+                onClick={() =>
+                  run(async () => {
+                    await adminResetPassword(reset.id, { padrao: true });
+                    setReset(undefined);
+                  }, 'Senha voltou para a senha padrão. A pessoa cria a própria senha ao entrar.')
+                }
+              >
+                Voltar para a senha padrão
+              </Button>
+              <Button
+                loading={busy}
+                disabled={pwd.length < 8}
+                onClick={() =>
+                  run(async () => {
+                    await adminResetPassword(reset.id, pwd);
+                    setReset(undefined);
+                  }, 'Senha redefinida. Informe a nova senha ao usuário.')
+                }
+              >
+                Redefinir com esta senha
+              </Button>
+            </div>
           }
         >
-          <Field label="Nova senha (mín. 8 caracteres)" hint="Informe ao usuário e peça para trocar em Minha conta.">
+          {!padraoSalvo && <Alert kind="warning">Defina a senha padrão acima para poder usar "Voltar para a senha padrão".</Alert>}
+          <Field label="Ou digite uma senha (mín. 8 caracteres)" hint="Informe ao usuário. No próximo acesso ele será obrigado a criar a própria senha.">
             <input className="input" value={pwd} onChange={(e) => setPwd(e.target.value)} />
           </Field>
         </Modal>

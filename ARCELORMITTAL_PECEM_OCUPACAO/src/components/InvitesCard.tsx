@@ -1,7 +1,7 @@
 // Convites: o coordenador envia um link de cadastro por e-mail e acompanha pendentes/aceitos.
 import { useCallback, useEffect, useState } from 'react';
-import { Copy, Mail, MessageCircle, RefreshCw, Send, UserPlus, X } from 'lucide-react';
-import { cancelInvite, isAllowedDomain, isEmailFormat, listInvites, normalizeEmail, ROLE_LABEL, roleForEmail, sendInvite, ALLOWED_DOMAINS, type Invite } from '../lib/auth';
+import { Copy, KeyRound, Mail, MessageCircle, RefreshCw, Send, UserPlus, X } from 'lucide-react';
+import { cancelInvite, createUserWithDefault, getDefaultPassword, isAllowedDomain, isEmailFormat, listInvites, normalizeEmail, ROLE_LABEL, roleForEmail, sendInvite, ALLOWED_DOMAINS, type Invite } from '../lib/auth';
 import { fmtDateTimeBR } from '../lib/dates';
 import { useDb } from '../lib/store';
 import type { Role } from '../types';
@@ -21,6 +21,7 @@ export default function InvitesCard() {
   const [invites, setInvites] = useState<Invite[]>();
   const [loadError, setLoadError] = useState('');
   const [sent, setSent] = useState<Sent>();
+  const [criados, setCriados] = useState<{ email: string; nome: string }[]>();
 
   const collabs = [...db.all('collaborators')].sort((a, b) => a.nome.localeCompare(b.nome));
   const profiles = db.all('profiles');
@@ -64,6 +65,27 @@ export default function InvitesCard() {
       setCollaboratorId('');
       await load();
     }, 'Convite criado.');
+
+  /** Cria os acessos já liberados com a senha padrão (a pessoa troca a senha no primeiro acesso). */
+  const createAccess = (list: { email: string; nome: string; role: Role; collaboratorId?: string }[]) =>
+    run(async () => {
+      const ok: { email: string; nome: string }[] = [];
+      const erros: string[] = [];
+      for (const p of list) {
+        try {
+          await createUserWithDefault(p);
+          ok.push({ email: p.email, nome: p.nome });
+        } catch (err) {
+          erros.push(`${p.email}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (ok.length) setCriados(ok);
+      setEmail('');
+      setNome('');
+      setCollaboratorId('');
+      await load();
+      if (erros.length) throw new Error(erros.join(' · '));
+    }, list.length > 1 ? 'Acessos criados com a senha padrão.' : 'Acesso criado com a senha padrão.');
 
   const e = normalizeEmail(email);
   const emailOk = isEmailFormat(e) && isAllowedDomain(e);
@@ -115,9 +137,23 @@ export default function InvitesCard() {
         {email && isEmailFormat(e) && !isAllowedDomain(e) && <Alert kind="error">Domínio não autorizado. Use {ALLOWED_DOMAINS.map((d) => '@' + d).join(', ')}.</Alert>}
         <Button icon={<Send className="h-4 w-4" />} loading={busy} disabled={!emailOk} onClick={() => invite({ email: e, nome, role, collaboratorId: role === 'colaborador' ? collaboratorId || undefined : undefined })}>
           Enviar convite
+        </Button>{' '}
+        <Button
+          variant="secondary"
+          icon={<KeyRound className="h-4 w-4" />}
+          loading={busy}
+          disabled={!emailOk}
+          onClick={() => createAccess([{ email: e, nome, role, collaboratorId: role === 'colaborador' ? collaboratorId || undefined : undefined }])}
+        >
+          Criar acesso com senha padrão
         </Button>
+        <p className="text-xs text-slate-500">
+          <b>Criar acesso com senha padrão</b> libera a pessoa na hora, sem depender de e-mail: ela entra com o e-mail corporativo e a senha padrão (definida em Usuários, abaixo) e é obrigada a criar a própria senha no
+          primeiro acesso.
+        </p>
 
         {sent && <InviteResult sent={sent} onClose={() => setSent(undefined)} />}
+        {criados && <DefaultAccessResult criados={criados} onClose={() => setCriados(undefined)} />}
 
         <TeamMessage />
 
@@ -125,7 +161,20 @@ export default function InvitesCard() {
           <div className="rounded-lg border border-slate-200 p-3">
             <div className="mb-2 flex items-center justify-between gap-2 text-sm font-medium">
               <span>Colaboradores com e-mail cadastrado e ainda sem acesso ({semAcesso.length})</span>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                icon={<KeyRound className="h-3.5 w-3.5" />}
+                onClick={() => {
+                  if (window.confirm(`Criar acesso com a senha padrão para ${semAcesso.length} colaborador(es)?`))
+                    createAccess(semAcesso.map((c) => ({ email: normalizeEmail(c.email!), nome: c.nome, role: 'colaborador' as Role, collaboratorId: c.id })));
+                }}
+              >
+                Criar acesso para todos com senha padrão
+              </Button>
             </div>
+            <p className="mb-2 text-xs text-slate-500">Clique no nome para enviar convite por e-mail.</p>
             <div className="flex flex-wrap gap-2">
               {semAcesso.map((c) => (
                 <Button key={c.id} size="sm" variant="secondary" disabled={busy} icon={<Send className="h-3.5 w-3.5" />} onClick={() => invite({ email: normalizeEmail(c.email!), nome: c.nome, role: 'colaborador', collaboratorId: c.id })}>
@@ -252,6 +301,39 @@ export function InviteResult({ sent, onClose }: { sent: Sent; onClose: () => voi
               </Button>
             </div>
           </Alert>
+  );
+}
+
+/** Acessos criados com a senha padrão: mensagem pronta para avisar as pessoas. */
+function DefaultAccessResult({ criados, onClose }: { criados: { email: string; nome: string }[]; onClose: () => void }) {
+  const toast = useToast();
+  const [senha, setSenha] = useState('');
+  useEffect(() => {
+    getDefaultPassword().then(setSenha).catch(() => setSenha(''));
+  }, []);
+  const msg = (c?: { nome: string; email: string }) =>
+    `Olá${c?.nome ? ' ' + c.nome.split(' ')[0] : ''}! Seu acesso ao sistema de Gestão de Atividades e Férias do Contrato AMP está liberado. Acesse ${window.location.origin} e entre com ${c ? `seu e-mail ${c.email}` : 'seu e-mail corporativo'} e a senha padrão ${senha || '(informada pelo coordenador)'}. No primeiro acesso o sistema pede para você criar sua própria senha.`;
+  const copy = async (t: string) => {
+    await navigator.clipboard.writeText(t);
+    toast('success', 'Copiado.');
+  };
+  const one = criados.length === 1 ? criados[0] : undefined;
+  return (
+    <Alert kind="success" title={one ? `Acesso criado para ${one.email}` : `${criados.length} acessos criados`}>
+      <p className="mb-2">Avise a pessoa: ela entra com o e-mail corporativo e a senha padrão, e cria a própria senha no primeiro acesso.</p>
+      <div className="mb-2 rounded bg-white/70 px-2 py-1 text-xs">{msg(one)}</div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" icon={<Copy className="h-4 w-4" />} onClick={() => copy(msg(one))}>
+          Copiar mensagem
+        </Button>
+        <Button size="sm" variant="secondary" icon={<MessageCircle className="h-4 w-4" />} onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(msg(one))}`, '_blank', 'noopener')}>
+          WhatsApp
+        </Button>
+        <Button size="sm" variant="ghost" icon={<X className="h-4 w-4" />} onClick={onClose}>
+          Fechar
+        </Button>
+      </div>
+    </Alert>
   );
 }
 
